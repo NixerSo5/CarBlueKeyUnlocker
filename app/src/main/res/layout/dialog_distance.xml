@@ -20,7 +20,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:stepSize="1"
-        android:value="1"
+        android:value="0"
         android:valueFrom="0"
         android:valueTo="3"
         app:labelBehavior="gone"
@@ -45,20 +45,6 @@
 
         <EditText
             android:id="@+id/etEnter"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="numberSigned" />
-
-        <com.google.android.material.textview.MaterialTextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="离开阈值 dBm（信号弱于此值算走远，例如 -75）"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
-
-        <EditText
-            android:id="@+id/etExit"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:inputType="numberSigned" />

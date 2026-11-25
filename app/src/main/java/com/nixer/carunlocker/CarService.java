@@ -12,8 +12,10 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -31,10 +33,15 @@ import java.util.Locale;
 
 public class CarService extends Service {
     private static final String TAG = "CarGuard";
-    private static final String SAIC_PACKAGE = "com.saicmotor.tocapp";
-    private static final String CHANNEL_ID = "car_guard";
-    private static final long COOLDOWN_MS = 90_000;
+    private static final String SAIC_PACKAGE = "com.saicmotor.tocapp"; // 上汽荣威专用分支：固定拉起目标
+    private static final String CHANNEL_ID = "car_guard_silent"; // 新通道：最低优先级，避免横幅打扰
+    private static final long RELAUNCH_GUARD_MS = 3_000; // 只防同一瞬间重复启动，不阻碍保活
+    private static final long KEEPALIVE_INTERVAL_MS = 30_000; // 独立保活轮询；BLE 只是检测手段
+    // 目标 App 中已导出的入口服务：无声拉起进程，App 自己会启动 DigitalKeyService
+    private static final String SILENT_DAEMON_CLASS = "com.uaes.key.core.daemon.huawei.BleICCEService";
     private static final long SAMPLE_INTERVAL_MS = 800; // 采样间隔，避免同一秒多次回调误判
+    private static final long NO_RESULT_RESTART_MS = 60_000; // 长时间收不到任何广播则重启扫描
+    private static final long TARGET_GONE_MS = 10_000;      // 目标消失超过 10 秒视为离开，重置连续计数
 
     private BluetoothLeScanner scanner;
     private boolean scanning = false;
@@ -44,24 +51,69 @@ public class CarService extends Service {
     private int foundCount = 0;
     private String targetMac = "";
     private String targetName = "";
+    private String launchPackage = "";
+    private String launchLabel = "";
+    private boolean daemonBound = false;
+    private boolean targetAlive = false; // 由守护服务绑定回调维护，作为进程存活判据
+    private final ServiceConnection daemonConnection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder service) { onDaemonConnected(name); }
+        @Override public void onServiceDisconnected(ComponentName name) { onDaemonDisconnected(name); }
+    };
+
+    private void onDaemonConnected(ComponentName name) {
+        daemonBound = true;
+        targetAlive = true;
+        AppPrefs.set(this, AppPrefs.K_TARGET_ALIVE, "1");
+        log("target daemon connected -> process alive: " + (name == null ? "" : name.getClassName()));
+    }
+
+    private void onDaemonDisconnected(ComponentName name) {
+        daemonBound = false;
+        targetAlive = false;
+        AppPrefs.set(this, AppPrefs.K_TARGET_ALIVE, "0");
+        log("target daemon disconnected -> process not alive: " + (name == null ? "" : name.getClassName()));
+    }
 
     // 距离判断状态
-    private int enterRssi = -60;   // 强于此值 = 进入近距离
-    private int exitRssi = -75;    // 弱于此值 = 走远
-    private int confirmTimes = 2;  // 连续几次采样都在近处才触发
+    private int enterRssi = -75;   // 强于此值 = 进入范围（默认很早就触发，给目标 App 连接时间）
+    private int confirmTimes = 2;  // 连续几次采样都在范围内才触发
     private int nearCount = 0;
     private long lastSampleTime = 0;
+    private long lastResultTime = 0;  // 最近一次收到任意广播的时间，用于识别“假扫描中”
+    private long lastTargetTime = 0;  // 最近一次收到目标广播的时间，用于超时重置
 
     private final Runnable heartbeat = new Runnable() {
         @Override
         public void run() {
             log("heartbeat, scanning=" + scanning + ", attempts=" + scanAttempts + ", nearCount=" + nearCount);
+            // 系统可能在无回调的情况下静默停掉 BLE 扫描；心跳不能只看布尔标志，要看是否真有广播进来
+            long quiet = SystemClock.elapsedRealtime() - lastResultTime;
+            if (scanning && quiet > NO_RESULT_RESTART_MS) {
+                log("no BLE result for " + (quiet / 1000) + "s, restarting scan");
+                restartScan();
+            }
             AppPrefs.set(CarService.this, AppPrefs.K_HEARTBEAT,
                     new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()));
             AppPrefs.set(CarService.this, AppPrefs.K_DEVICE_COUNT, String.valueOf(foundCount));
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) nm.notify(1, buildNotification());
             handler.postDelayed(this, 15_000);
+        }
+    };
+
+    /** 不依赖 BLE：只要目标进程死了就拉起，BLE 命中只是提前触发。 */
+    private final Runnable keepAliveCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (!TextUtils.isEmpty(launchPackage)) {
+                if (!targetAlive) {
+                    log("KEEPALIVE: 目标守护未连接，准备拉起");
+                    launchSelectedApp("KEEPALIVE");
+                } else {
+                    log("KEEPALIVE: 目标守护已连接，目标进程正常运行");
+                }
+            }
+            handler.postDelayed(this, KEEPALIVE_INTERVAL_MS);
         }
     };
 
@@ -95,6 +147,7 @@ public class CarService extends Service {
             }
             int rssi = result.getRssi();
             foundCount++;
+            lastResultTime = SystemClock.elapsedRealtime();
 
             boolean byMac = !TextUtils.isEmpty(targetMac) && targetMac.equalsIgnoreCase(addr);
             boolean byName = !TextUtils.isEmpty(targetName) && name != null
@@ -105,29 +158,33 @@ public class CarService extends Service {
             AppPrefs.set(CarService.this, AppPrefs.K_CURRENT_RSSI, rssi + " dBm");
 
             long now = SystemClock.elapsedRealtime();
+            // 不做“弱信号走远”判断：离开后本来就收不到广播，用超时判定更可靠
+            if (nearCount > 0 && now - lastTargetTime > TARGET_GONE_MS) {
+                log("目标广播消失超过 " + (TARGET_GONE_MS / 1000) + "s，重置连续计数");
+                nearCount = 0;
+            }
+            lastTargetTime = now;
+
             if (now - lastSampleTime < SAMPLE_INTERVAL_MS) return; // 采样节流
             lastSampleTime = now;
 
             if (rssi >= enterRssi) {
                 nearCount++;
-                log("目标信号强: " + rssi + " dBm, 连续近 = " + nearCount + "/" + confirmTimes);
+                log("目标信号: " + rssi + " dBm, 连续 = " + nearCount + "/" + confirmTimes);
                 if (nearCount >= confirmTimes) {
                     nearCount = 0; // 触发后清零，靠冷却时间防重复
                     String seen = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
                     AppPrefs.set(CarService.this, AppPrefs.K_LAST_SEEN, seen + " / " + addr + " / " + rssi + "dBm");
-                    log("TARGET NEAR -> launching SAIC (" + addr + " / " + name + " / " + rssi + "dBm)");
-                    launchSaic();
+                    launchSelectedApp("TARGET NEAR(" + rssi + "dBm / " + name + ")");
                 }
-            } else if (rssi < exitRssi) {
-                if (nearCount > 0) log("目标信号弱: " + rssi + " dBm, 重置连续计数");
-                nearCount = 0; // 走远，重置（迟滞：enter 与 exit 之间保持不变）
             }
         }
 
         @Override
         public void onScanFailed(int errorCode) {
             log("scan failed, code=" + errorCode);
-            if (errorCode == 1) {
+            if (errorCode == 1) { // SCAN_FAILED_ALREADY_STARTED：首次扫描仍在跑，无需重试
+                log("scan already active (code=1), ignored");
                 scanning = true;
                 return;
             }
@@ -142,9 +199,15 @@ public class CarService extends Service {
         log("onCreate");
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "07电子钥匙助手守护", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, "07电子钥匙助手守护（静默）", NotificationManager.IMPORTANCE_MIN);
+            ch.setSound(null, null);
+            ch.enableVibration(false);
+            ch.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.createNotificationChannel(ch);
+            if (nm != null) {
+                nm.createNotificationChannel(ch);
+                nm.deleteNotificationChannel("car_guard"); // 清掉会弹横幅的旧通道
+            }
         }
     }
 
@@ -153,15 +216,21 @@ public class CarService extends Service {
         log("onStartCommand");
         targetMac = AppPrefs.targetMac(this);
         targetName = AppPrefs.targetName(this);
-        enterRssi = AppPrefs.getInt(this, AppPrefs.K_RSSI_ENTER, -60);
-        exitRssi = AppPrefs.getInt(this, AppPrefs.K_RSSI_EXIT, -75);
+        launchPackage = SAIC_PACKAGE;
+        launchLabel = "上汽荣威";
+        enterRssi = AppPrefs.getInt(this, AppPrefs.K_RSSI_ENTER, -75);
         confirmTimes = AppPrefs.getInt(this, AppPrefs.K_CONFIRM_TIMES, 2);
         if (confirmTimes < 1) confirmTimes = 1;
         nearCount = 0;
-        log("target = " + targetName + " / " + targetMac + " | enter=" + enterRssi + " exit=" + exitRssi + " confirm=" + confirmTimes);
+        lastResultTime = SystemClock.elapsedRealtime();
+        lastTargetTime = lastResultTime;
+        log("target = " + targetName + " / " + targetMac + " | launch = " + launchLabel + " / " + launchPackage
+                + " | enter=" + enterRssi + " confirm=" + confirmTimes + " (离开按超时 " + (TARGET_GONE_MS / 1000) + "s 判定)");
         startForeground(1, buildNotification());
         handler.removeCallbacks(heartbeat);
         handler.post(heartbeat);
+        handler.removeCallbacks(keepAliveCheck);
+        handler.post(keepAliveCheck);
         startScan();
         // 该 ROM 上第一次 startScan 常常没有回调，300ms 后再直接调一次（不 stop）
         handler.postDelayed(this::startScan, 300);
@@ -177,11 +246,19 @@ public class CarService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
+        if (Build.VERSION.SDK_INT < 26) {
+            b.setPriority(Notification.PRIORITY_MIN)
+                    .setSound(null)
+                    .setVibrate(new long[0]);
+        }
         return b.setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setContentTitle("07电子钥匙助手 · 守护中")
                 .setContentText("目标: " + t + " | 信号: " + (TextUtils.isEmpty(rssi) ? "--" : rssi))
                 .setContentIntent(pi)
                 .setOngoing(true)
+                .setShowWhen(false)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setVisibility(Notification.VISIBILITY_SECRET)
                 .build();
     }
 
@@ -212,9 +289,9 @@ public class CarService extends Service {
                     .build();
             if (scanning && scanner != null) {
                 // 关键：不 stop，直接再 start 一次，ROM 才会开始回调
-                log("second startScan call (no stop)");
+                log("second startScan call (no stop, ROM workaround)");
                 scanner.startScan(null, settings, scanCallback);
-                log("BLE scan restarted OK");
+                log("BLE scan re-trigger requested");
                 return;
             }
             scanner.startScan(null, settings, scanCallback);
@@ -226,28 +303,57 @@ public class CarService extends Service {
         }
     }
 
-    private void launchSaic() {
-        // 目标应用已在运行（含后台）就不再拉起，避免反复把它切到前台打扰用户
-        if (isAppRunning(SAIC_PACKAGE)) {
-            log("目标应用已在运行，跳过拉起: " + SAIC_PACKAGE);
-            return;
-        }
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastLaunch < COOLDOWN_MS) return;
-        lastLaunch = now;
-        Intent i = getPackageManager().getLaunchIntentForPackage(SAIC_PACKAGE);
-        if (i != null) {
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
-            log("SAIC launched");
-            // 让目标应用退到后台：把自己 App 的任务切回前台
-            handler.postDelayed(this::bringOurTaskToFront, 300);
-        } else {
-            log("SAIC package not found");
+    /** 系统可能在无回调的情况下静默停掉扫描；停掉旧扫描后重新来一次，避免心跳假活。 */
+    private void restartScan() {
+        log("restartScan: stop old scan and start fresh");
+        try {
+            if (scanner != null) {
+                try { scanner.stopScan(scanCallback); } catch (Throwable ignored) {}
+            }
+        } finally {
+            scanning = false;
+            startScan();
         }
     }
 
-    /** 目标应用进程是否存活（无特殊权限，进程刚被杀或从未启动则返回 false）。 */
+    private void launchSelectedApp(String trigger) {
+        if (TextUtils.isEmpty(launchPackage)) {
+            log(trigger + " -> 未选择拉起应用，跳过");
+            return;
+        }
+        // 绑定成功后目标进程肯定存活；后台也算运行，不需要切到前台
+        if (targetAlive) {
+            log(trigger + " -> 目标进程仍在运行，跳过拉起: " + launchPackage);
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastLaunch < RELAUNCH_GUARD_MS) {
+            log(trigger + " -> 刚刚拉起过，3秒内不重复启动: " + launchPackage);
+            return;
+        }
+        lastLaunch = now;
+        // 首选：启动已导出的守护服务，无声拉起进程；目标 App 自己会开 DigitalKeyService，不打扰当前界面
+        try {
+            Intent svc = new Intent().setComponent(new ComponentName(launchPackage, SILENT_DAEMON_CLASS));
+            if (daemonBound) {
+                try { unbindService(daemonConnection); } catch (Throwable ignored) {}
+                daemonBound = false;
+            }
+            boolean bound = bindService(svc, daemonConnection, Context.BIND_AUTO_CREATE);
+            if (bound) {
+                log(trigger + " -> bound daemon silently: " + SILENT_DAEMON_CLASS);
+                return;
+            }
+            startService(svc);
+            log(trigger + " -> started daemon silently: " + SILENT_DAEMON_CLASS);
+            return;
+        } catch (Throwable t) {
+            // 绝不弹界面兜底；被 ROM 拦截时提示用户开一次“自启动/关联启动”即可
+            logError(trigger + " -> 被系统拦截，未拉起（请在系统设置给本 App 开启自启动/关联启动）", t);
+        }
+    }
+
+    /** 目标应用进程是否存活；后台也算运行，不需要切到前台。 */
     private boolean isAppRunning(String pkg) {
         if (TextUtils.isEmpty(pkg)) return false;
         try {
@@ -267,29 +373,6 @@ public class CarService extends Service {
         return false;
     }
 
-    /** 把自己 App 的任务切回前台，目标应用随之退到后台继续运行。 */
-    private void bringOurTaskToFront() {
-        try {
-            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
-            if (am == null) return;
-            java.util.List<ActivityManager.AppTask> tasks = am.getAppTasks();
-            if (tasks == null || tasks.isEmpty()) {
-                log("bringOurTaskToFront: no own task");
-                return;
-            }
-            for (ActivityManager.AppTask task : tasks) {
-                try {
-                    task.moveToFront();
-                    log("bringOurTaskToFront: moved own task to front -> target backgrounded");
-                    return;
-                } catch (Throwable ignored) {
-                }
-            }
-        } catch (Throwable t) {
-            logError("bringOurTaskToFront error", t);
-        }
-    }
-
     @Override
     public void onDestroy() {
         log("onDestroy");
@@ -297,6 +380,11 @@ public class CarService extends Service {
             try { scanner.stopScan(scanCallback); } catch (Throwable ignored) {}
         }
         handler.removeCallbacks(heartbeat);
+        handler.removeCallbacks(keepAliveCheck);
+        if (daemonBound) {
+            try { unbindService(daemonConnection); } catch (Throwable ignored) {}
+            daemonBound = false;
+        }
         super.onDestroy();
     }
 

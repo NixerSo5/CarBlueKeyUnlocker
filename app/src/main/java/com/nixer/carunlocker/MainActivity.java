@@ -2,6 +2,7 @@ package com.nixer.carunlocker;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
@@ -15,6 +16,7 @@ import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -23,6 +25,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.Spannable;
+import android.text.TextWatcher;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
@@ -31,20 +34,26 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.material.slider.Slider;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.LinkedHashMap;
@@ -53,18 +62,37 @@ import java.util.List;
 public class MainActivity extends Activity {
     private static final String TAG = "CarGuard";
     private static final int REQ_PERMS = 100;
+    private static final String SAIC_PACKAGE = "com.saicmotor.tocapp"; // 上汽荣威专用分支
+    private static final String SAIC_LABEL = "上汽荣威";
 
-    // 4 挡：很近 / 近 / 远 / 自定义
-    private static final String[] MODE_NAMES = {"很近（约1米）", "近（约2米·推荐）", "远（约3-5米）", "自定义"};
-    private static final int[] MODE_ENTER = {-50, -60, -68, -60};
-    private static final int[] MODE_EXIT = {-65, -75, -80, -75};
-    private static final int[] MODE_TIMES = {3, 2, 2, 2};
+    // 4 挡：非常远 / 远 / 近 / 自定义。默认非常远，给目标 App 留出启动+连接蓝牙的时间
+    private static final String[] MODE_NAMES = {"非常远（约5-10米·推荐）", "远（约3-5米）", "近（约2米）", "自定义"};
+    private static final int[] MODE_ENTER = {-75, -68, -60, -75};
+    private static final int[] MODE_TIMES = {2, 2, 2, 2};
 
     private TextView statusText;
     private TextView targetText;
+    private TextView processText;
     private Button btnSelect;
     private Button btnStart;
     private Button btnDistance;
+    private Button btnLog;
+
+    private AlertDialog logDialog;
+    private TextView logText;
+    private ScrollView logScroll;
+    private CheckBox logAutoRefresh;
+    private final Handler logHandler = new Handler();
+    private final Runnable logRefresh = new Runnable() {
+        @Override
+        public void run() {
+            if (logDialog == null || !logDialog.isShowing() || logText == null) return;
+            int y = logScroll != null ? logScroll.getScrollY() : 0;
+            logText.setText(colorizeLog(readLogTail(300)));
+            if (logScroll != null) logScroll.post(() -> logScroll.scrollTo(0, y));
+            logHandler.postDelayed(this, 1500);
+        }
+    };
 
     private AlertDialog deviceDialog;
     private ListView dialogDeviceList;
@@ -92,13 +120,16 @@ public class MainActivity extends Activity {
 
         targetText = findViewById(R.id.targetText);
         statusText = findViewById(R.id.statusText);
+        processText = findViewById(R.id.processText);
         btnSelect = findViewById(R.id.btnSelect);
         btnStart = findViewById(R.id.btnStart);
         btnDistance = findViewById(R.id.btnDistance);
+        btnLog = findViewById(R.id.btnLog);
 
         btnSelect.setOnClickListener(v -> showDeviceDialog());
         btnStart.setOnClickListener(v -> startGuard());
         btnDistance.setOnClickListener(v -> showDistanceDialog());
+        btnLog.setOnClickListener(v -> showLogDialog());
 
         requestAllPermissions();
         scheduleKeepAlive();
@@ -117,9 +148,9 @@ public class MainActivity extends Activity {
 
     private String modeDescription(int mode) {
         switch (clampMode(mode)) {
-            case 0: return "走到约1米内才触发（≥ -50dBm，连续3次）";
-            case 1: return "走到车旁边触发，推荐（≥ -60dBm，连续2次）";
-            case 2: return "接近车辆时提前触发（≥ -68dBm，连续2次）";
+            case 0: return "提前触发，给 App 留出启动和连接时间（≥ -75dBm，连续2次）";
+            case 1: return "接近车辆时触发（≥ -68dBm，连续2次）";
+            case 2: return "走到车旁边才触发（≥ -60dBm，连续2次）";
             default: return "手动设置进入/离开阈值和确认次数";
         }
     }
@@ -145,20 +176,38 @@ public class MainActivity extends Activity {
         String lastSeen = AppPrefs.get(this, AppPrefs.K_LAST_SEEN);
         String started = AppPrefs.get(this, AppPrefs.K_SERVICE_START);
         String rssi = AppPrefs.get(this, AppPrefs.K_CURRENT_RSSI);
-        int mode = clampMode(AppPrefs.getInt(this, AppPrefs.K_DISTANCE_MODE, 1));
+        int mode = clampMode(AppPrefs.getInt(this, AppPrefs.K_DISTANCE_MODE, 0));
         int enter = AppPrefs.getInt(this, AppPrefs.K_RSSI_ENTER, MODE_ENTER[mode]);
-        int exit = AppPrefs.getInt(this, AppPrefs.K_RSSI_EXIT, MODE_EXIT[mode]);
         int times = AppPrefs.getInt(this, AppPrefs.K_CONFIRM_TIMES, MODE_TIMES[mode]);
 
+        String launchPkg = SAIC_PACKAGE;
+        String launchLabel = SAIC_LABEL;
+        String launch = TextUtils.isEmpty(launchLabel) ? launchPkg : launchLabel;
+        boolean launchRunning = "1".equals(AppPrefs.get(this, AppPrefs.K_TARGET_ALIVE));
+
+        SpannableStringBuilder pb = new SpannableStringBuilder();
+        pb.append("目标App进程: ");
+        if (TextUtils.isEmpty(launchPkg)) {
+            int s = pb.length();
+            pb.append("未选择");
+            pb.setSpan(new ForegroundColorSpan(Color.parseColor("#999999")), s, pb.length(),
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        } else {
+            appendStatusLine(pb, launchRunning);
+            pb.append(launchRunning ? "  (" : "  (未检测到进程)(").append(launch).append(")");
+        }
+        processText.setText(pb);
+
         SpannableStringBuilder sb = new SpannableStringBuilder();
+        sb.append("拉起应用: ").append(launch).append("\n");
         sb.append("守护服务: ");
         appendStatusLine(sb, running);
         sb.append("\n已发现设备数: ").append(TextUtils.isEmpty(count) ? "0" : count);
         sb.append("\n当前信号强度: ").append(TextUtils.isEmpty(rssi) ? "--" : rssi);
         sb.append("\n距离挡位: ").append(String.valueOf(mode + 1)).append("/4  ").append(modeName(mode));
         sb.append("\n距离判断: >=").append(String.valueOf(enter))
-                .append("dBm 触发, <=").append(String.valueOf(exit))
-                .append("dBm 走远, 连续").append(String.valueOf(times)).append("次");
+                .append("dBm 触发, 连续").append(String.valueOf(times))
+                .append("次（信号消失10s重置）");
         sb.append("\n最近一次发现目标: ").append(TextUtils.isEmpty(lastSeen) ? "暂无" : lastSeen);
         sb.append("\n服务启动时间: ").append(TextUtils.isEmpty(started) ? "暂无" : started);
         sb.append("\n看门狗: ");
@@ -166,6 +215,18 @@ public class MainActivity extends Activity {
         statusText.setText(sb);
 
         btnStart.setText(running ? "重启守护服务" : "启动守护服务");
+    }
+
+    private boolean isProcessRunning(String pkg) {
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return false;
+            for (ActivityManager.RunningAppProcessInfo p : am.getRunningAppProcesses()) {
+                if (p.pkgList == null) continue;
+                for (String n : p.pkgList) if (pkg.equals(n)) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     private Integer parseIntOrNull(EditText et) {
@@ -192,6 +253,104 @@ public class MainActivity extends Activity {
             out.write(line.getBytes("UTF-8"));
             out.close();
         } catch (Throwable ignored) {}
+    }
+
+    /** 右上角“扫描日志”：读取 carguard.log 最近若干行，最新在最上面。 */
+    private String readLogTail(int maxLines) {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) return "无法获取日志目录";
+        File f = new File(dir, "carguard.log");
+        if (!f.exists() || !f.canRead()) return "暂无日志文件，服务启动后会自动生成";
+        BufferedReader reader = null;
+        try {
+            reader = new BufferedReader(new InputStreamReader(new FileInputStream(f), "UTF-8"));
+            List<String> lines = new ArrayList<>();
+            String line;
+            while ((line = reader.readLine()) != null) lines.add(line);
+            int from = Math.max(0, lines.size() - maxLines);
+            StringBuilder sb = new StringBuilder();
+            sb.append("共 ").append(lines.size()).append(" 行，显示最近 ")
+                    .append(Math.min(maxLines, lines.size())).append(" 行（最新在上）\n\n");
+            for (int i = lines.size() - 1; i >= from; i--) {
+                sb.append(lines.get(i)).append('\n');
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "读取日志失败: " + t.getMessage();
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    /** 扫到目标/触发=绿色，失败/错误=红色，其余灰色。 */
+    private CharSequence colorizeLog(String text) {
+        SpannableStringBuilder sb = new SpannableStringBuilder(text);
+        int start = 0;
+        String[] lines = text.split("\n", -1);
+        for (String line : lines) {
+            int end = Math.min(start + line.length(), sb.length());
+            int color;
+            if (line.contains("目标信号") || line.contains("TARGET NEAR")
+                    || line.contains("launched ") || line.contains("目标广播消失")
+                    || line.contains("目标进程仍在运行") || line.contains("刚刚拉起过")
+                    || line.contains("KEEPALIVE") || line.contains("started daemon silently")
+                    || line.contains("bound daemon silently") || line.contains("target daemon connected")) {
+                color = Color.parseColor("#2E7D32"); // 绿色：扫到目标
+            } else if (line.contains("failed") || line.contains("error")
+                    || line.contains("ERROR") || line.contains("异常") || line.contains("被系统拦截")) {
+                color = Color.parseColor("#C62828"); // 红色：失败/错误
+            } else {
+                color = Color.rgb(55, 71, 79);
+            }
+            if (end > start) {
+                sb.setSpan(new ForegroundColorSpan(color), start, end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            start = end + 1;
+        }
+        return sb;
+    }
+
+    private void showLogDialog() {
+        if (logDialog != null && logDialog.isShowing()) return;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+
+        logAutoRefresh = new CheckBox(this);
+        logAutoRefresh.setText("自动刷新（1.5秒）");
+        logAutoRefresh.setChecked(true);
+        root.addView(logAutoRefresh, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        logScroll = new ScrollView(this);
+        logText = new TextView(this);
+        logText.setTextSize(12);
+        logText.setTextColor(Color.rgb(55, 71, 79));
+        logText.setTextIsSelectable(true); // 可勾选文字复制
+        logScroll.addView(logText);
+        root.addView(logScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        logText.setText(colorizeLog(readLogTail(300)));
+
+        logDialog = new AlertDialog.Builder(this)
+                .setTitle("扫描日志（最新在最上方）")
+                .setView(root)
+                .setNeutralButton("立即刷新", null)
+                .setPositiveButton("关闭", null)
+                .setOnDismissListener(d -> {
+                    logHandler.removeCallbacks(logRefresh);
+                    logDialog = null;
+                })
+                .show();
+        logDialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+                .setOnClickListener(v -> logText.setText(colorizeLog(readLogTail(300))));
+        logAutoRefresh.setOnCheckedChangeListener((button, checked) -> {
+            logHandler.removeCallbacks(logRefresh);
+            if (checked) logHandler.post(logRefresh);
+        });
+        logHandler.post(logRefresh);
     }
 
     private void showDeviceDialog() {
@@ -242,13 +401,11 @@ public class MainActivity extends Activity {
         TextView modeLabel = v.findViewById(R.id.modeLabel);
         View customBox = v.findViewById(R.id.customBox);
         EditText etEnter = v.findViewById(R.id.etEnter);
-        EditText etExit = v.findViewById(R.id.etExit);
         EditText etTimes = v.findViewById(R.id.etTimes);
 
-        int mode = clampMode(AppPrefs.getInt(this, AppPrefs.K_DISTANCE_MODE, 1));
+        int mode = clampMode(AppPrefs.getInt(this, AppPrefs.K_DISTANCE_MODE, 0));
         slider.setValue(mode);
         etEnter.setText(String.valueOf(AppPrefs.getInt(this, AppPrefs.K_RSSI_ENTER, MODE_ENTER[mode])));
-        etExit.setText(String.valueOf(AppPrefs.getInt(this, AppPrefs.K_RSSI_EXIT, MODE_EXIT[mode])));
         etTimes.setText(String.valueOf(AppPrefs.getInt(this, AppPrefs.K_CONFIRM_TIMES, MODE_TIMES[mode])));
         updateDistanceDialogUi(mode, modeLabel, customBox);
 
@@ -261,23 +418,17 @@ public class MainActivity extends Activity {
                 .setPositiveButton("保存并生效", (d, w) -> {
                     int m = clampMode(Math.round(slider.getValue()));
                     int enter;
-                    int exit;
                     int times;
 
                     if (m == 3) {
                         Integer e = parseIntOrNull(etEnter);
-                        Integer x = parseIntOrNull(etExit);
                         Integer t = parseIntOrNull(etTimes);
-                        if (e == null || x == null || t == null) {
+                        if (e == null || t == null) {
                             Toast.makeText(this, "请输入有效数字", Toast.LENGTH_SHORT).show();
                             return;
                         }
-                        if (e < -100 || e > 0 || x < -100 || x > 0) {
-                            Toast.makeText(this, "阈值范围应为 -100 到 0", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                        if (x > e) {
-                            Toast.makeText(this, "离开阈值必须小于/等于进入阈值（更负）", Toast.LENGTH_LONG).show();
+                        if (e < -100 || e > 0) {
+                            Toast.makeText(this, "进入阈值范围应为 -100 到 0（建议 -75 左右）", Toast.LENGTH_SHORT).show();
                             return;
                         }
                         if (t < 1 || t > 10) {
@@ -285,21 +436,18 @@ public class MainActivity extends Activity {
                             return;
                         }
                         enter = e;
-                        exit = x;
                         times = t;
                     } else {
                         enter = MODE_ENTER[m];
-                        exit = MODE_EXIT[m];
                         times = MODE_TIMES[m];
                     }
 
                     AppPrefs.set(this, AppPrefs.K_DISTANCE_MODE, String.valueOf(m));
                     AppPrefs.set(this, AppPrefs.K_RSSI_ENTER, String.valueOf(enter));
-                    AppPrefs.set(this, AppPrefs.K_RSSI_EXIT, String.valueOf(exit));
                     AppPrefs.set(this, AppPrefs.K_CONFIRM_TIMES, String.valueOf(times));
                     startGuard();
                     Toast.makeText(this,
-                            "已保存：" + modeName(m) + "  进入≥" + enter + " / 离开≤" + exit + " / 连续" + times + "次",
+                            "已保存：" + modeName(m) + "  进入≥" + enter + " / 连续" + times + "次（信号消失10s重置）",
                             Toast.LENGTH_LONG).show();
                 })
                 .setNegativeButton("取消", null)

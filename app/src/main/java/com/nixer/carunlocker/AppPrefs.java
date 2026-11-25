@@ -16,12 +16,17 @@ public final class AppPrefs {
     public static final String K_ASKED_BATTERY = "asked_battery";
     public static final String K_ASKED_BG_LOCATION = "asked_bg_location";
 
-    // 距离判断配置（默认：进入 -60dBm，离开 -75dBm，连续 2 次）
+    // 距离判断配置（默认：进入 -75dBm，离开 -85dBm，连续 2 次，提前给 App 留出连接时间）
     public static final String K_RSSI_ENTER = "rssi_enter";
-    public static final String K_RSSI_EXIT = "rssi_exit";
+    public static final String K_RSSI_EXIT = "rssi_exit"; // 已废弃：不再按弱信号判断离开，改为广播消失超时
     public static final String K_CONFIRM_TIMES = "confirm_times";
     public static final String K_CURRENT_RSSI = "current_rssi";
+    public static final String K_TARGET_ALIVE = "target_alive";
     public static final String K_DISTANCE_MODE = "distance_mode"; // 0很近 1近 2远 3自定义
+
+    // 通用版：用户选择要拉起的应用
+    public static final String K_LAUNCH_PACKAGE = "launch_package";
+    public static final String K_LAUNCH_LABEL = "launch_label";
 
     public static int getInt(Context c, String key, int def) {
         String v = get(c, key);
