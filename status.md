@@ -3,7 +3,7 @@
 > 更新日期：2026-11-25
 > 当前分支：`rongwei`（上汽荣威专用）
 > 当前版本：`1.2`（`versionCode=12`）
-> 项目路径：`C:\Users\nixer\Desktop\car\car-blue-key-unlocker`
+> 项目路径：`C:\Users\nixer\Desktop\CarUnlocker`
 
 ---
 
@@ -28,12 +28,13 @@ Android BLE 蓝牙钥匙助手。BLE 只负责**检测车辆**，真正的目标
 ## 2. Git 状态
 
 ```text
-* rongwei  [origin/rongwei] 版本 1.2（静默保活 + 绑定守护服务判活）
-  master   [origin/master]  未改动，未 push
+* rongwei  [gitee/rongwei] [origin/rongwei] 版本 1.2（静默保活 + 绑定守护服务判活）
+  master   [gitee/master] [origin/master]   未改动，未 push
 ```
 
-- 远端：`origin` = https://gitee.com/nixer/car-blue-key-unlocker.git
-- 本次只 push `rongwei`，**不改 master、不 push master**
+- 远端：`gitee` = https://gitee.com/nixer/car-blue-key-unlocker.git
+- 远端：`origin` = https://github.com/NixerSo5/CarBlueKeyUnlocker.git
+- 本次只 push `rongwei`（gitee + github），**不改 master、不 push master**
 - 旧 Tag：`v1.0.0-rongwei` 不包含本次静默保活逻辑
 - 本地 Git 身份：`nixer <nixer456@163.com>`
 
@@ -139,9 +140,7 @@ target daemon connected -> process alive
 ## 5. 构建
 
 ```powershell
-$env:JAVA_HOME='C:\Users\nixer\AppData\Local\Temp\opencode\jdk\jdk-17.0.21.1+2'
-$env:ANDROID_HOME='C:\Users\nixer\AppData\Local\Temp\opencode\android-sdk'
-$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+$env:JAVA_HOME='C:\Users\nixer\.jdkvm\v21.0.3+9'
 .\gradlew.bat assembleDebug --no-daemon
 ```
 
