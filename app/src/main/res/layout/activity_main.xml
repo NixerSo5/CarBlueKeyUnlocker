@@ -14,7 +14,7 @@
     <com.google.android.material.textview.MaterialTextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="07电子钥匙助手 · 后台守护中"
+        android:text="蓝牙钥匙助手 · 后台守护中"
         android:textColor="@color/text_secondary"
         android:textSize="13sp"
         android:paddingBottom="12dp" />
@@ -70,6 +70,26 @@
         app:elevation="6dp"
         app:pressedTranslationZ="12dp"
         app:rippleColor="@color/primary_dark" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSelectApp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:minHeight="52dp"
+        android:text="选择要拉起的应用"
+        android:textAllCaps="false"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        app:backgroundTint="@color/launch_button"
+        app:cornerRadius="4dp"
+        app:elevation="6dp"
+        app:pressedTranslationZ="12dp"
+        app:rippleColor="#4A148C" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnStart"

@@ -16,8 +16,12 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- 通用版：需要看到所有带启动入口的应用，才能让用户选择拉起哪个 -->
     <queries>
-        <package android:name="com.saicmotor.tocapp" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application

@@ -23,6 +23,10 @@ public final class AppPrefs {
     public static final String K_CURRENT_RSSI = "current_rssi";
     public static final String K_DISTANCE_MODE = "distance_mode"; // 0很近 1近 2远 3自定义
 
+    // 通用版：用户选择要拉起的应用
+    public static final String K_LAUNCH_PACKAGE = "launch_package";
+    public static final String K_LAUNCH_LABEL = "launch_label";
+
     public static int getInt(Context c, String key, int def) {
         String v = get(c, key);
         if (v == null || v.length() == 0) return def;

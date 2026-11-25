@@ -15,6 +15,7 @@ import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -23,6 +24,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.Spannable;
+import android.text.TextWatcher;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
@@ -45,6 +47,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.LinkedHashMap;
@@ -63,6 +66,7 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private TextView targetText;
     private Button btnSelect;
+    private Button btnSelectApp;
     private Button btnStart;
     private Button btnDistance;
 
@@ -70,12 +74,21 @@ public class MainActivity extends Activity {
     private ListView dialogDeviceList;
     private TextView scanStatus;
 
+    private AlertDialog appDialog;
+    private ListView dialogAppList;
+    private EditText etAppFilter;
+
     private final Handler handler = new Handler();
     private BluetoothLeScanner scanner;
     private boolean picking = false;
 
     private final LinkedHashMap<String, String> devices = new LinkedHashMap<>();
     private final List<String> deviceKeys = new ArrayList<>();
+
+    // 通用版：可拉起的应用列表
+    private final LinkedHashMap<String, String> appLabels = new LinkedHashMap<>(); // 包名 -> 显示名
+    private final List<String> appPackages = new ArrayList<>();
+    private final List<String> appVisible = new ArrayList<>();
 
     private final Runnable statusRefresh = new Runnable() {
         @Override
@@ -93,10 +106,12 @@ public class MainActivity extends Activity {
         targetText = findViewById(R.id.targetText);
         statusText = findViewById(R.id.statusText);
         btnSelect = findViewById(R.id.btnSelect);
+        btnSelectApp = findViewById(R.id.btnSelectApp);
         btnStart = findViewById(R.id.btnStart);
         btnDistance = findViewById(R.id.btnDistance);
 
         btnSelect.setOnClickListener(v -> showDeviceDialog());
+        btnSelectApp.setOnClickListener(v -> showAppDialog());
         btnStart.setOnClickListener(v -> startGuard());
         btnDistance.setOnClickListener(v -> showDistanceDialog());
 
@@ -150,7 +165,13 @@ public class MainActivity extends Activity {
         int exit = AppPrefs.getInt(this, AppPrefs.K_RSSI_EXIT, MODE_EXIT[mode]);
         int times = AppPrefs.getInt(this, AppPrefs.K_CONFIRM_TIMES, MODE_TIMES[mode]);
 
+        String launchPkg = AppPrefs.get(this, AppPrefs.K_LAUNCH_PACKAGE);
+        String launchLabel = AppPrefs.get(this, AppPrefs.K_LAUNCH_LABEL);
+        String launch = TextUtils.isEmpty(launchPkg) ? "未选择"
+                : (TextUtils.isEmpty(launchLabel) ? launchPkg : launchLabel);
+
         SpannableStringBuilder sb = new SpannableStringBuilder();
+        sb.append("拉起应用: ").append(launch).append("\n");
         sb.append("守护服务: ");
         appendStatusLine(sb, running);
         sb.append("\n已发现设备数: ").append(TextUtils.isEmpty(count) ? "0" : count);
@@ -233,6 +254,112 @@ public class MainActivity extends Activity {
             StringWriter sw = new StringWriter();
             t.printStackTrace(new PrintWriter(sw));
             mainLog("showDeviceDialog ERROR: " + sw.toString());
+        }
+    }
+
+    private void showAppDialog() {
+        mainLog("showAppDialog clicked");
+        try {
+            if (appDialog != null && appDialog.isShowing()) return;
+            loadInstalledApps();
+
+            View v = LayoutInflater.from(this).inflate(R.layout.dialog_app, null);
+            etAppFilter = v.findViewById(R.id.etAppFilter);
+            dialogAppList = v.findViewById(R.id.dialogAppList);
+            dialogAppList.setAdapter(new AppAdapter());
+            dialogAppList.setOnItemClickListener((parent, view, position, id) -> {
+                if (position < 0 || position >= appVisible.size()) return;
+                String pkg = appVisible.get(position);
+                String label = appLabels.get(pkg);
+                AppPrefs.set(this, AppPrefs.K_LAUNCH_PACKAGE, pkg);
+                AppPrefs.set(this, AppPrefs.K_LAUNCH_LABEL, label == null ? pkg : label);
+                if (appDialog != null) appDialog.dismiss();
+                Toast.makeText(this, "已选择拉起: " + label + "\n" + pkg, Toast.LENGTH_LONG).show();
+                startGuard();
+            });
+            etAppFilter.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                @Override public void afterTextChanged(android.text.Editable s) {
+                    filterApps(s == null ? "" : s.toString());
+                }
+            });
+
+            appDialog = new AlertDialog.Builder(this)
+                    .setTitle("选择要拉起的应用")
+                    .setView(v)
+                    .setNegativeButton("取消", null)
+                    .setOnDismissListener(d -> {
+                        appDialog = null;
+                        dialogAppList = null;
+                        etAppFilter = null;
+                    })
+                    .show();
+            appDialog.setCanceledOnTouchOutside(false);
+            mainLog("app dialog shown=" + appDialog.isShowing() + ", apps=" + appPackages.size());
+        } catch (Throwable t) {
+            StringWriter sw = new StringWriter();
+            t.printStackTrace(new PrintWriter(sw));
+            mainLog("showAppDialog ERROR: " + sw.toString());
+        }
+    }
+
+    private void loadInstalledApps() {
+        appLabels.clear();
+        appPackages.clear();
+        appVisible.clear();
+        try {
+            PackageManager pm = getPackageManager();
+            Intent main = new Intent(Intent.ACTION_MAIN);
+            main.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> apps = pm.queryIntentActivities(main, 0);
+            for (ResolveInfo ri : apps) {
+                String pkg = ri.activityInfo.packageName;
+                if (TextUtils.isEmpty(pkg) || appLabels.containsKey(pkg)) continue;
+                CharSequence l = ri.loadLabel(pm);
+                appLabels.put(pkg, l == null ? pkg : l.toString());
+                appPackages.add(pkg);
+            }
+            Collections.sort(appPackages, (a, b) -> {
+                String la = appLabels.get(a);
+                String lb = appLabels.get(b);
+                return (la == null ? a : la).compareToIgnoreCase(lb == null ? b : lb);
+            });
+            appVisible.addAll(appPackages);
+        } catch (Throwable t) {
+            mainLog("loadInstalledApps ERROR: " + t.getMessage());
+        }
+    }
+
+    private void filterApps(String query) {
+        appVisible.clear();
+        String key = query == null ? "" : query.trim().toLowerCase(Locale.getDefault());
+        for (String pkg : appPackages) {
+            String label = appLabels.get(pkg);
+            if (key.isEmpty()
+                    || (label != null && label.toLowerCase(Locale.getDefault()).contains(key))
+                    || pkg.toLowerCase(Locale.getDefault()).contains(key)) {
+                appVisible.add(pkg);
+            }
+        }
+        if (dialogAppList != null && dialogAppList.getAdapter() != null) {
+            ((BaseAdapter) dialogAppList.getAdapter()).notifyDataSetChanged();
+        }
+    }
+
+    private class AppAdapter extends BaseAdapter {
+        @Override public int getCount() { return appVisible.size(); }
+        @Override public Object getItem(int i) { return appVisible.get(i); }
+        @Override public long getItemId(int i) { return i; }
+        @Override public View getView(int i, View view, ViewGroup parent) {
+            TextView tv = view instanceof TextView ? (TextView) view : new TextView(MainActivity.this);
+            String pkg = appVisible.get(i);
+            String label = appLabels.get(pkg);
+            tv.setText((label == null ? pkg : label) + "\n" + pkg);
+            tv.setTextSize(15);
+            tv.setTextColor(getResources().getColor(R.color.text_primary));
+            tv.setPadding(12, 16, 12, 16);
+            return tv;
         }
     }
 

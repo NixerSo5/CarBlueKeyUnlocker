@@ -7,4 +7,6 @@
     <color name="text_secondary">#757575</color>
     <color name="card_background">#FFFFFF</color>
     <color name="window_background">#F5F5F5</color>
+    <color name="ic_launcher_background">#1565C0</color>
+    <color name="launch_button">#6A1B9A</color>
 </resources>

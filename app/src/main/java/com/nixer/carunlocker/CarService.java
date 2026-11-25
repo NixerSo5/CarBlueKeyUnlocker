@@ -30,7 +30,6 @@ import java.util.Locale;
 
 public class CarService extends Service {
     private static final String TAG = "CarGuard";
-    private static final String SAIC_PACKAGE = "com.saicmotor.tocapp";
     private static final String CHANNEL_ID = "car_guard";
     private static final long COOLDOWN_MS = 90_000;
     private static final long SAMPLE_INTERVAL_MS = 800; // 采样间隔，避免同一秒多次回调误判
@@ -43,6 +42,8 @@ public class CarService extends Service {
     private int foundCount = 0;
     private String targetMac = "";
     private String targetName = "";
+    private String launchPackage = "";
+    private String launchLabel = "";
 
     // 距离判断状态
     private int enterRssi = -60;   // 强于此值 = 进入近距离
@@ -114,8 +115,8 @@ public class CarService extends Service {
                     nearCount = 0; // 触发后清零，靠冷却时间防重复
                     String seen = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
                     AppPrefs.set(CarService.this, AppPrefs.K_LAST_SEEN, seen + " / " + addr + " / " + rssi + "dBm");
-                    log("TARGET NEAR -> launching SAIC (" + addr + " / " + name + " / " + rssi + "dBm)");
-                    launchSaic();
+                    log("TARGET NEAR -> launching " + launchLabel + " (" + addr + " / " + name + " / " + rssi + "dBm)");
+                    launchSelectedApp();
                 }
             } else if (rssi < exitRssi) {
                 if (nearCount > 0) log("目标信号弱: " + rssi + " dBm, 重置连续计数");
@@ -141,7 +142,7 @@ public class CarService extends Service {
         log("onCreate");
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "07电子钥匙助手守护", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, "蓝牙钥匙助手守护", NotificationManager.IMPORTANCE_LOW);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
         }
@@ -152,12 +153,15 @@ public class CarService extends Service {
         log("onStartCommand");
         targetMac = AppPrefs.targetMac(this);
         targetName = AppPrefs.targetName(this);
+        launchPackage = AppPrefs.get(this, AppPrefs.K_LAUNCH_PACKAGE);
+        launchLabel = AppPrefs.get(this, AppPrefs.K_LAUNCH_LABEL);
         enterRssi = AppPrefs.getInt(this, AppPrefs.K_RSSI_ENTER, -60);
         exitRssi = AppPrefs.getInt(this, AppPrefs.K_RSSI_EXIT, -75);
         confirmTimes = AppPrefs.getInt(this, AppPrefs.K_CONFIRM_TIMES, 2);
         if (confirmTimes < 1) confirmTimes = 1;
         nearCount = 0;
-        log("target = " + targetName + " / " + targetMac + " | enter=" + enterRssi + " exit=" + exitRssi + " confirm=" + confirmTimes);
+        log("target = " + targetName + " / " + targetMac + " | launch = " + launchLabel + " / " + launchPackage
+                + " | enter=" + enterRssi + " exit=" + exitRssi + " confirm=" + confirmTimes);
         startForeground(1, buildNotification());
         handler.removeCallbacks(heartbeat);
         handler.post(heartbeat);
@@ -177,7 +181,7 @@ public class CarService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         return b.setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-                .setContentTitle("07电子钥匙助手 · 守护中")
+                .setContentTitle("蓝牙钥匙助手 · 守护中")
                 .setContentText("目标: " + t + " | 信号: " + (TextUtils.isEmpty(rssi) ? "--" : rssi))
                 .setContentIntent(pi)
                 .setOngoing(true)
@@ -225,17 +229,25 @@ public class CarService extends Service {
         }
     }
 
-    private void launchSaic() {
+    private void launchSelectedApp() {
+        if (TextUtils.isEmpty(launchPackage)) {
+            log("未选择拉起应用，跳过");
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
         if (now - lastLaunch < COOLDOWN_MS) return;
         lastLaunch = now;
-        Intent i = getPackageManager().getLaunchIntentForPackage(SAIC_PACKAGE);
-        if (i != null) {
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
-            log("SAIC launched");
-        } else {
-            log("SAIC package not found");
+        try {
+            Intent i = getPackageManager().getLaunchIntentForPackage(launchPackage);
+            if (i != null) {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                log("launched " + launchLabel + " / " + launchPackage);
+            } else {
+                log("launch intent not found: " + launchPackage);
+            }
+        } catch (Throwable t) {
+            logError("launch failed", t);
         }
     }
 
