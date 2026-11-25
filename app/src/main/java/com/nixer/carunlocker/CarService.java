@@ -1,5 +1,6 @@
 package com.nixer.carunlocker;
 
+import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -226,6 +227,11 @@ public class CarService extends Service {
     }
 
     private void launchSaic() {
+        // 目标应用已在运行（含后台）就不再拉起，避免反复把它切到前台打扰用户
+        if (isAppRunning(SAIC_PACKAGE)) {
+            log("目标应用已在运行，跳过拉起: " + SAIC_PACKAGE);
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
         if (now - lastLaunch < COOLDOWN_MS) return;
         lastLaunch = now;
@@ -234,8 +240,53 @@ public class CarService extends Service {
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
             log("SAIC launched");
+            // 让目标应用退到后台：把自己 App 的任务切回前台
+            handler.postDelayed(this::bringOurTaskToFront, 300);
         } else {
             log("SAIC package not found");
+        }
+    }
+
+    /** 目标应用进程是否存活（无特殊权限，进程刚被杀或从未启动则返回 false）。 */
+    private boolean isAppRunning(String pkg) {
+        if (TextUtils.isEmpty(pkg)) return false;
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return false;
+            java.util.List<ActivityManager.RunningAppProcessInfo> list = am.getRunningAppProcesses();
+            if (list == null) return false;
+            for (ActivityManager.RunningAppProcessInfo info : list) {
+                if (info == null || info.pkgList == null) continue;
+                for (String p : info.pkgList) {
+                    if (pkg.equals(p)) return true;
+                }
+            }
+        } catch (Throwable t) {
+            logError("isAppRunning error", t);
+        }
+        return false;
+    }
+
+    /** 把自己 App 的任务切回前台，目标应用随之退到后台继续运行。 */
+    private void bringOurTaskToFront() {
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return;
+            java.util.List<ActivityManager.AppTask> tasks = am.getAppTasks();
+            if (tasks == null || tasks.isEmpty()) {
+                log("bringOurTaskToFront: no own task");
+                return;
+            }
+            for (ActivityManager.AppTask task : tasks) {
+                try {
+                    task.moveToFront();
+                    log("bringOurTaskToFront: moved own task to front -> target backgrounded");
+                    return;
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            logError("bringOurTaskToFront error", t);
         }
     }
 

@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 拉起目标应用后，把自己的任务切回前台，让目标应用退到后台运行 -->
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
 
     <queries>
         <package android:name="com.saicmotor.tocapp" />
