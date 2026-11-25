@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingTop="16dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="8dp">
+
+    <TextView
+        android:id="@+id/scanStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="正在扫描附近蓝牙设备..."
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+    <ListView
+        android:id="@+id/dialogDeviceList"
+        android:layout_width="match_parent"
+        android:layout_height="320dp"
+        android:background="@color/card_background"
+        android:divider="#EEEEEE"
+        android:dividerHeight="1dp" />
+</LinearLayout>

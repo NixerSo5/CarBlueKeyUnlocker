@@ -1,0 +1,31 @@
+# Gradle / build output
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Local config (contains machine-specific SDK path)
+local.properties
+
+# Signing keys
+*.jks
+*.keystore
+debug.keystore
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Built APKs (in case copied outside build/)
+*.apk
