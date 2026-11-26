@@ -29,9 +29,17 @@ Android BLE 蓝牙钥匙助手。BLE 只负责**检测车辆**，真正的目标
 
 ```text
 * rongweiWZ  （新分支）版本 1.4：靠近车辆 -> 无障碍自动打开上汽数字钥匙页
-  rongwei   [gitee/rongwei] [origin/rongwei] 版本 1.3（静默保活 + 绑定守护服务判活 + SDK 静默初始化）
+  rongwei   [gitee/rongwei] [origin/rongwei] 版本 1.4（已合并 rongweiWZ）
   master    [gitee/master] [origin/master]   未改动，未 push
 ```
+
+- 远端：`gitee` = https://gitee.com/nixer/car-blue-key-unlocker.git
+- 远端：`origin` = https://github.com/NixerSo5/CarBlueKeyUnlocker.git
+- Tag `v1.4` 已推送到 gitee + github
+- Release（含 APK + 使用说明）：
+  - Gitee: https://gitee.com/nixer/car-blue-key-unlocker/releases/tag/v1.4 （id `1371097`）
+  - GitHub: https://github.com/NixerSo5/CarBlueKeyUnlocker/releases/tag/v1.4 （id `459131842`）
+- APK SHA256：`BB29BDDF48759FE5180C2FB546E7126F7B465AF62AB4CDE2E9E1B4B3CFADBB3F`
 
 ---
 
@@ -220,4 +228,5 @@ $env:JAVA_HOME='C:\Users\nixer\.jdkvm\v21.0.3+9'
 2. 真车旁验证：锁屏状态下触发，上汽 App 是否能在后台完成连接（不依赖点击）
 3. 确认锁屏时是否需要保留“点亮屏幕”选项，或改为引导用户解锁
 4. 如果实测锁屏不可用，评估：保持上汽任务停在数字钥匙页 + 只拉起 App 的方案
-5. 发布 v1.4 到 Gitee / GitHub（分支 `rongweiWZ` -> `rongwei`）
+5. ~~发布 v1.4 到 Gitee / GitHub~~ ✅ 已完成（tag `v1.4`，两个 Release 均含 APK + 使用说明）
+6. 真车实测后按结果决定 v1.4.1 / v1.5 方向
