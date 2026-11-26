@@ -35,6 +35,10 @@ Android BLE 蓝牙钥匙助手。BLE 只负责**检测车辆**，真正的目标
 - 远端：`gitee` = https://gitee.com/nixer/car-blue-key-unlocker.git
 - 远端：`origin` = https://github.com/NixerSo5/CarBlueKeyUnlocker.git
 - 本次只 push `rongwei`（gitee + github），**不改 master、不 push master**
+- Tag `v1.3` 已推送到 gitee + github
+- Release（含 APK + 使用说明）：
+  - Gitee: https://gitee.com/nixer/car-blue-key-unlocker/releases/tag/v1.3
+  - GitHub: https://github.com/NixerSo5/CarBlueKeyUnlocker/releases/tag/v1.3
 - 旧 Tag：`v1.0.0-rongwei` 不包含本次静默保活逻辑
 - 本地 Git 身份：`nixer <nixer456@163.com>`
 
@@ -158,6 +162,6 @@ $env:JAVA_HOME='C:\Users\nixer\.jdkvm\v21.0.3+9'
 
 ## 6. 待办
 
-1. push `rongwei` 到 `origin/rongwei`（版本 1.3）
-2. 如需发布，再创建 `v1.3` Tag 和 Release
-3. 真车旁验证默认“非常远”挡位的触发距离和连接时间
+1. 真车旁验证默认“非常远”挡位的触发距离和连接时间
+2. 观察 Android 16 上 `HonorPullLiveService1` 是否被后台 FGS 限制拦截（logcat 查 `ForegroundServiceStartNotAllowedException`）
+3. 验证上汽 SP 中 token/VIN 存在时 `initSuccess` 是否变为 true
