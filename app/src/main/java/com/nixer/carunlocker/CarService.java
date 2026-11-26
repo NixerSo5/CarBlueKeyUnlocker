@@ -39,6 +39,10 @@ public class CarService extends Service {
     private static final long KEEPALIVE_INTERVAL_MS = 30_000; // 独立保活轮询；BLE 只是检测手段
     // 目标 App 中已导出的入口服务：无声拉起进程，App 自己会启动 DigitalKeyService
     private static final String SILENT_DAEMON_CLASS = "com.uaes.key.core.daemon.huawei.BleICCEService";
+    // 已导出的主进程服务：onStartCommand 会调 DigitalKeySDKDelegate.initService()，用于静默完成 SDK 初始化
+    private static final String SDK_INIT_SERVICE = "com.uaes.key.core.daemon.honor.HonorPullLiveService1";
+    private static final long SDK_INIT_DELAY_MS = 500; // 给守护绑定/Application 初始化留一点时间
+    private static final long SDK_SCAN_FOLLOWUP_MS = 4_000; // 等 DigitalKeyService 绑定完成后再触发 BLE 扫描
     private static final long SAMPLE_INTERVAL_MS = 800; // 采样间隔，避免同一秒多次回调误判
     private static final long NO_RESULT_RESTART_MS = 60_000; // 长时间收不到任何广播则重启扫描
     private static final long TARGET_GONE_MS = 10_000;      // 目标消失超过 10 秒视为离开，重置连续计数
@@ -55,6 +59,7 @@ public class CarService extends Service {
     private String launchLabel = "";
     private boolean daemonBound = false;
     private boolean targetAlive = false; // 由守护服务绑定回调维护，作为进程存活判据
+    private boolean sdkInitScheduled = false;
     private final ServiceConnection daemonConnection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder service) { onDaemonConnected(name); }
         @Override public void onServiceDisconnected(ComponentName name) { onDaemonDisconnected(name); }
@@ -70,6 +75,10 @@ public class CarService extends Service {
     private void onDaemonDisconnected(ComponentName name) {
         daemonBound = false;
         targetAlive = false;
+        // 目标进程可能已重启，允许下次拉起时重新初始化 SDK
+        sdkInitScheduled = false;
+        handler.removeCallbacks(sdkInitTask);
+        handler.removeCallbacks(sdkScanTask);
         AppPrefs.set(this, AppPrefs.K_TARGET_ALIVE, "0");
         log("target daemon disconnected -> process not alive: " + (name == null ? "" : name.getClassName()));
     }
@@ -116,6 +125,49 @@ public class CarService extends Service {
             handler.postDelayed(this, KEEPALIVE_INTERVAL_MS);
         }
     };
+
+    /** 一次性静默初始化上汽 SDK：启动导出服务，使其调用 DigitalKeySDKDelegate.initService()。 */
+    private final Runnable sdkInitTask = new Runnable() {
+        @Override
+        public void run() {
+            triggerSdkInit("SDK INIT");
+            handler.removeCallbacks(sdkScanTask);
+            handler.postDelayed(sdkScanTask, SDK_SCAN_FOLLOWUP_MS);
+        }
+    };
+
+    /** init() 内 bindService 是异步的；稍后再触发一次，确保 mService 已就绪并启动 BLE 扫描。 */
+    private final Runnable sdkScanTask = new Runnable() {
+        @Override
+        public void run() {
+            triggerSdkInit("SDK SCAN FOLLOWUP");
+        }
+    };
+
+    private void scheduleSdkInit() {
+        if (sdkInitScheduled) return;
+        sdkInitScheduled = true;
+        handler.removeCallbacks(sdkInitTask);
+        handler.postDelayed(sdkInitTask, SDK_INIT_DELAY_MS);
+    }
+
+    private void triggerSdkInit(String reason) {
+        try {
+            Intent svc = new Intent().setComponent(new ComponentName(SAIC_PACKAGE, SDK_INIT_SERVICE));
+            String mac = targetMac;
+            if (TextUtils.isEmpty(mac)) {
+                // mac 只要求非空；有真实车辆 MAC 时优先用真实的
+                mac = "00:00:00:00:00:00";
+            }
+            svc.putExtra("BleParamsOrigin", "CarGuard");
+            svc.putExtra("keyId", "carguard");
+            svc.putExtra("mac", mac);
+            startService(svc);
+            log(reason + " -> started SAIC SDK init service silently: " + SDK_INIT_SERVICE + " mac=" + mac);
+        } catch (Throwable t) {
+            logError(reason + " -> start SAIC SDK init service failed", t);
+        }
+    }
 
     private void log(String msg) {
         Log.d(TAG, msg);
@@ -234,6 +286,8 @@ public class CarService extends Service {
         startScan();
         // 该 ROM 上第一次 startScan 常常没有回调，300ms 后再直接调一次（不 stop）
         handler.postDelayed(this::startScan, 300);
+        // 静默完成上汽数字钥匙 SDK 初始化；不弹任何上汽 Activity
+        scheduleSdkInit();
         return START_STICKY;
     }
 
@@ -332,6 +386,8 @@ public class CarService extends Service {
             return;
         }
         lastLaunch = now;
+        // 进程刚被拉起时 SDK 尚未初始化，补一次静默初始化触发（已触发过则忽略）
+        scheduleSdkInit();
         // 首选：启动已导出的守护服务，无声拉起进程；目标 App 自己会开 DigitalKeyService，不打扰当前界面
         try {
             Intent svc = new Intent().setComponent(new ComponentName(launchPackage, SILENT_DAEMON_CLASS));
@@ -381,6 +437,8 @@ public class CarService extends Service {
         }
         handler.removeCallbacks(heartbeat);
         handler.removeCallbacks(keepAliveCheck);
+        handler.removeCallbacks(sdkInitTask);
+        handler.removeCallbacks(sdkScanTask);
         if (daemonBound) {
             try { unbindService(daemonConnection); } catch (Throwable ignored) {}
             daemonBound = false;

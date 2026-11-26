@@ -1,8 +1,8 @@
 # 项目状态 / Status
 
-> 更新日期：2026-11-25
+> 更新日期：2026-11-26
 > 当前分支：`rongwei`（上汽荣威专用）
-> 当前版本：`1.2`（`versionCode=12`）
+> 当前版本：`1.3`（`versionCode=13`）
 > 项目路径：`C:\Users\nixer\Desktop\CarUnlocker`
 
 ---
@@ -28,7 +28,7 @@ Android BLE 蓝牙钥匙助手。BLE 只负责**检测车辆**，真正的目标
 ## 2. Git 状态
 
 ```text
-* rongwei  [gitee/rongwei] [origin/rongwei] 版本 1.2（静默保活 + 绑定守护服务判活）
+* rongwei  [gitee/rongwei] [origin/rongwei] 版本 1.3（静默保活 + 绑定守护服务判活 + SDK 静默初始化）
   master   [gitee/master] [origin/master]   未改动，未 push
 ```
 
@@ -73,6 +73,11 @@ UI 已删除“离开阈值”输入框。
   - 绑定成功 = 目标进程一定存活
   - `onServiceDisconnected` = 进程不存活，下一轮保活重新绑定
 - `com.zone.tsp.ble.core.DigitalKeyService` 未导出，由目标 App 自己启动
+- 新增静默 SDK 初始化触发（一次性 + 4 秒后补一次扫描）：
+  - `startService()` → `com.saicmotor.tocapp/com.uaes.key.core.daemon.honor.HonorPullLiveService1`
+  - extras：`BleParamsOrigin="CarGuard"`、`keyId="carguard"`、`mac=目标车辆MAC（为空时用占位符）`
+  - 该服务 `onStartCommand` 会调 `DigitalKeySDK.initService()`，使 `initSuccess=true`；补发第二次用于 `mService` 绑定后启动 BLE 扫描
+  - 仍不 `startActivity`，不弹上汽荣威 Activity；只可能出现上汽前台服务通知
 - 绝不 `startActivity` 兜底，不弹上汽荣威界面
 - 不会把自己的界面切回前台（已删掉 `bringOurTaskToFront()`）
 - `RELAUNCH_GUARD_MS = 3_000`，只防同一瞬间重复触发；无 90 秒冷却
@@ -153,6 +158,6 @@ $env:JAVA_HOME='C:\Users\nixer\.jdkvm\v21.0.3+9'
 
 ## 6. 待办
 
-1. push `rongwei` 到 `origin/rongwei`（版本 1.2）
-2. 如需发布，再创建 `v1.2` Tag 和 Release（当前未创建）
+1. push `rongwei` 到 `origin/rongwei`（版本 1.3）
+2. 如需发布，再创建 `v1.3` Tag 和 Release
 3. 真车旁验证默认“非常远”挡位的触发距离和连接时间
