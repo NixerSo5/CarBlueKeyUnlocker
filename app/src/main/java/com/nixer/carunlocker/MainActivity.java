@@ -77,6 +77,8 @@ public class MainActivity extends Activity {
     private Button btnStart;
     private Button btnDistance;
     private Button btnLog;
+    private Button btnAccess;
+    private CheckBox cbWakeScreen;
 
     private AlertDialog logDialog;
     private TextView logText;
@@ -125,11 +127,35 @@ public class MainActivity extends Activity {
         btnStart = findViewById(R.id.btnStart);
         btnDistance = findViewById(R.id.btnDistance);
         btnLog = findViewById(R.id.btnLog);
+        btnAccess = findViewById(R.id.btnAccess);
+        cbWakeScreen = findViewById(R.id.cbWakeScreen);
 
         btnSelect.setOnClickListener(v -> showDeviceDialog());
-        btnStart.setOnClickListener(v -> startGuard());
+        btnStart.setOnClickListener(v -> {
+            startGuard();
+            if (!SaicKeyAccessibilityService.isEnabled(this)) {
+                Toast.makeText(this,
+                        "提示：靠近车辆自动解锁需要开启无障碍权限（点“无障碍”按钮）",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
         btnDistance.setOnClickListener(v -> showDistanceDialog());
         btnLog.setOnClickListener(v -> showLogDialog());
+        btnAccess.setOnClickListener(v -> openAccessibilitySettings());
+        // 长按：立即手动测试一次“打开数字钥匙页”流程（不用等车）
+        btnAccess.setOnLongClickListener(v -> {
+            boolean ok = SaicKeyAccessibilityService.trigger(this, "手动测试");
+            Toast.makeText(this, ok ? "已触发：正在打开数字钥匙页" : "无障碍未开启，无法触发",
+                    Toast.LENGTH_LONG).show();
+            return true;
+        });
+        // 靠近车辆时自动打开上汽数字钥匙页：默认开启（需要无障碍权限）
+        if (AppPrefs.get(this, AppPrefs.K_AUTO_OPEN_DK).length() == 0) {
+            AppPrefs.setBool(this, AppPrefs.K_AUTO_OPEN_DK, true);
+        }
+        cbWakeScreen.setChecked(AppPrefs.getBool(this, AppPrefs.K_WAKE_SCREEN, false));
+        cbWakeScreen.setOnCheckedChangeListener((button, checked) ->
+                AppPrefs.setBool(this, AppPrefs.K_WAKE_SCREEN, checked));
 
         requestAllPermissions();
         scheduleKeepAlive();
@@ -210,11 +236,30 @@ public class MainActivity extends Activity {
                 .append("次（信号消失10s重置）");
         sb.append("\n最近一次发现目标: ").append(TextUtils.isEmpty(lastSeen) ? "暂无" : lastSeen);
         sb.append("\n服务启动时间: ").append(TextUtils.isEmpty(started) ? "暂无" : started);
+        boolean accOn = SaicKeyAccessibilityService.isEnabled(this);
+        String accState = AppPrefs.get(this, AppPrefs.K_ACC_STATE);
+        sb.append("\n数字钥匙自动打开: ").append(accOn ? "无障碍已开启" : "未开启（点下方按钮）");
+        if (!TextUtils.isEmpty(accState)) sb.append("\n无障碍状态: ").append(accState);
         sb.append("\n看门狗: ");
         appendStatusLine(sb, Utils.isServiceRunning(this, WatchdogService.class));
         statusText.setText(sb);
 
         btnStart.setText(running ? "重启守护服务" : "启动守护服务");
+        if (btnAccess != null) {
+            btnAccess.setText(accOn
+                    ? "无障碍：已开启（点击管理）"
+                    : "无障碍：未开启（点击开启）");
+        }
+    }
+
+    private void openAccessibilitySettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            Toast.makeText(this,
+                    "请找到“07电子钥匙助手”并开启无障碍权限", Toast.LENGTH_LONG).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, "无法打开无障碍设置: " + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private boolean isProcessRunning(String pkg) {
@@ -620,3 +665,4 @@ public class MainActivity extends Activity {
         }
     }
 }
+

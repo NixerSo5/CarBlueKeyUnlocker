@@ -48,6 +48,20 @@
             android:name=".WatchdogService"
             android:exported="false" />
 
+        <!-- 无障碍服务：靠近车辆时自动打开上汽 App 的数字钥匙页 -->
+        <service
+            android:name=".SaicKeyAccessibilityService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

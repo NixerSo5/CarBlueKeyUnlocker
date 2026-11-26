@@ -28,6 +28,11 @@ public final class AppPrefs {
     public static final String K_LAUNCH_PACKAGE = "launch_package";
     public static final String K_LAUNCH_LABEL = "launch_label";
 
+    // 靠近车辆时自动打开上汽“数字钥匙”页（需要无障碍权限）
+    public static final String K_AUTO_OPEN_DK = "auto_open_dk";         // 默认 1=开
+    public static final String K_WAKE_SCREEN = "wake_screen";           // 默认 0=不主动点亮屏幕
+    public static final String K_ACC_STATE = "acc_state";               // 无障碍流程状态（用于界面显示）
+
     public static int getInt(Context c, String key, int def) {
         String v = get(c, key);
         if (v == null || v.length() == 0) return def;
@@ -44,6 +49,16 @@ public final class AppPrefs {
 
     public static void set(Context c, String key, String value) {
         sp(c).edit().putString(key, value).apply();
+    }
+
+    public static boolean getBool(Context c, String key, boolean def) {
+        String v = get(c, key);
+        if (v == null || v.length() == 0) return def;
+        return "1".equals(v);
+    }
+
+    public static void setBool(Context c, String key, boolean value) {
+        set(c, key, value ? "1" : "0");
     }
 
     public static String targetMac(Context c) { return get(c, K_TARGET_MAC); }

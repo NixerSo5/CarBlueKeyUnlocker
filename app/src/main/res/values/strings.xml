@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">07电子钥匙助手</string>
+    <string name="accessibility_desc">靠近车辆时，自动打开上汽荣威 App 的数字钥匙页，让车辆完成蓝牙连接与解锁。本服务只识别并点击“数字钥匙”入口，不会点击登录、支付或隐私协议等按钮。</string>
 </resources>

@@ -19,6 +19,7 @@ import android.content.ServiceConnection;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
@@ -46,6 +47,7 @@ public class CarService extends Service {
     private static final long SAMPLE_INTERVAL_MS = 800; // 采样间隔，避免同一秒多次回调误判
     private static final long NO_RESULT_RESTART_MS = 60_000; // 长时间收不到任何广播则重启扫描
     private static final long TARGET_GONE_MS = 10_000;      // 目标消失超过 10 秒视为离开，重置连续计数
+    private static final long DK_TRIGGER_COOLDOWN_MS = 90_000; // 自动打开数字钥匙页的最小间隔
 
     private BluetoothLeScanner scanner;
     private boolean scanning = false;
@@ -60,6 +62,7 @@ public class CarService extends Service {
     private boolean daemonBound = false;
     private boolean targetAlive = false; // 由守护服务绑定回调维护，作为进程存活判据
     private boolean sdkInitScheduled = false;
+    private long lastDkTrigger = 0;      // 上次请求打开数字钥匙页的时间
     private final ServiceConnection daemonConnection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder service) { onDaemonConnected(name); }
         @Override public void onServiceDisconnected(ComponentName name) { onDaemonDisconnected(name); }
@@ -228,6 +231,7 @@ public class CarService extends Service {
                     String seen = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
                     AppPrefs.set(CarService.this, AppPrefs.K_LAST_SEEN, seen + " / " + addr + " / " + rssi + "dBm");
                     launchSelectedApp("TARGET NEAR(" + rssi + "dBm / " + name + ")");
+                    maybeTriggerDigitalKey(rssi, name);
                 }
             }
         }
@@ -406,6 +410,48 @@ public class CarService extends Service {
         } catch (Throwable t) {
             // 绝不弹界面兜底；被 ROM 拦截时提示用户开一次“自启动/关联启动”即可
             logError(trigger + " -> 被系统拦截，未拉起（请在系统设置给本 App 开启自启动/关联启动）", t);
+        }
+    }
+
+    /**
+     * 靠近车辆时，通过无障碍服务把上汽 App 打开到“数字钥匙”页。
+     * 手机屏幕亮着并已解锁时最可靠；锁屏时系统会挡住点击，可开启“点亮屏幕”尝试。
+     */
+    private void maybeTriggerDigitalKey(int rssi, String name) {
+        if (!AppPrefs.getBool(this, AppPrefs.K_AUTO_OPEN_DK, true)) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDkTrigger < DK_TRIGGER_COOLDOWN_MS) {
+            log("DK: 冷却中，跳过自动打开数字钥匙页");
+            return;
+        }
+        if (!SaicKeyAccessibilityService.isEnabled(this)) {
+            log("DK: 无障碍未开启，跳过（请在 App 内开启无障碍权限）");
+            return;
+        }
+        lastDkTrigger = now;
+        if (AppPrefs.getBool(this, AppPrefs.K_WAKE_SCREEN, false)) {
+            wakeScreenIfNeeded();
+        }
+        boolean ok = SaicKeyAccessibilityService.trigger(
+                this, "TARGET NEAR(" + rssi + "dBm / " + name + ")");
+        log(ok ? "DK: 已请求无障碍打开数字钥匙页"
+                : "DK: 无障碍服务未就绪，请求失败");
+    }
+
+    /** 可选：靠近时短暂点亮屏幕，方便无障碍读取界面（锁屏时仍需用户解锁）。 */
+    private void wakeScreenIfNeeded() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm == null || pm.isInteractive()) return;
+            PowerManager.WakeLock wl = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "CarGuard:DKWake");
+            wl.acquire(8000);
+            log("DK: 已点亮屏幕 8 秒");
+        } catch (Throwable t) {
+            logError("DK: 点亮屏幕失败", t);
         }
     }
 
