@@ -1,6 +1,7 @@
 package com.nixer.carunlocker;
 
 import android.content.Context;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
@@ -32,7 +33,10 @@ import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
 import java.security.spec.ECPrivateKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -104,10 +108,7 @@ public final class KeyFetcher {
             if (TextUtils.isEmpty(BuildConfig.VC_APP_KEY) || TextUtils.isEmpty(BuildConfig.VC_PKSK_HEX)) {
                 throw new IllegalStateException("本机 local.properties 缺少 APP_KEY/APP_SECRET/PKSK_HEX，无法登录取钥匙");
             }
-            vin = BuildConfig.SAIC_VIN;
-            if (TextUtils.isEmpty(vin)) {
-                throw new IllegalStateException("未配置车架号 VIN，请在 local.properties 填写 SAIC_VIN");
-            }
+            vin = nonEmpty(BuildConfig.SAIC_VIN, AppPrefs.get(ctx, AppPrefs.K_SAIC_VIN));
             // uuid 可以随机生成；deviceId 决定钥匙归属，首次登录时生成并保存
             uuid = nonEmpty(BuildConfig.SAIC_UUID, AppPrefs.get(ctx, AppPrefs.K_SAIC_UUID));
             if (TextUtils.isEmpty(uuid)) {
@@ -140,6 +141,24 @@ public final class KeyFetcher {
             }
             String toc = loginData.optJSONObject("loginData").optString("token");
             if (TextUtils.isEmpty(toc)) throw new IllegalStateException("登录响应没有 token");
+
+            if (!TextUtils.isEmpty(BuildConfig.BANMA_SIGN_KEY)) {
+                progress("自动获取账号车辆 VIN…");
+                String fetched = fetchVin(toc, uuid, deviceId);
+                if (!TextUtils.isEmpty(fetched)) {
+                    AppPrefs.set(ctx, AppPrefs.K_SAIC_VIN, fetched);
+                    progress("已自动获取车架号 VIN");
+                    if (TextUtils.isEmpty(vin)) {
+                        vin = fetched;
+                    } else if (!fetched.equalsIgnoreCase(vin)) {
+                        progress("账号车辆与配置 VIN 不一致，继续使用配置值");
+                    }
+                }
+            }
+            if (TextUtils.isEmpty(vin)) vin = AppPrefs.get(ctx, AppPrefs.K_SAIC_VIN);
+            if (TextUtils.isEmpty(vin)) {
+                throw new IllegalStateException("无法自动获取 VIN；请在 local.properties 配置 SAIC_VIN 兜底");
+            }
             progress("2/5 登录成功，换取 zone token…");
 
             JSONObject zoneBody = new JSONObject();
@@ -237,6 +256,104 @@ public final class KeyFetcher {
     private static String brief(String s) {
         if (s == null) return "";
         return s.length() <= 320 ? s : s.substring(0, 320) + "…";
+    }
+
+    // ---------------- 账号车辆列表（自动获取 VIN） ----------------
+
+    private String fetchVin(String toc, String uuid, String deviceId) {
+        if (TextUtils.isEmpty(BuildConfig.BANMA_SIGN_KEY)) {
+            progress("未配置 BANMA_SIGN_KEY，跳过自动获取 VIN");
+            return "";
+        }
+        String path = "/car/api/app/getSimpleVehicleInfo";
+        String body = "{}";
+        String ts = String.valueOf(System.currentTimeMillis());
+        HttpURLConnection conn = null;
+        try {
+            String sign = banmaSign("roewe", path, ts, body, BuildConfig.BANMA_SIGN_KEY);
+            conn = (HttpURLConnection) new URL("https://mp.ebanma.com" + path).openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(20000);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setRequestProperty("Uuid", uuid);
+            conn.setRequestProperty("DeviceID", deviceId);
+            conn.setRequestProperty("token", toc);
+            conn.setRequestProperty("brandCode", "1");
+            conn.setRequestProperty("timestamp", ts);
+            conn.setRequestProperty("os", "android");
+            conn.setRequestProperty("osVersion", String.valueOf(Build.VERSION.SDK_INT));
+            conn.setRequestProperty("x-client-id", "APP");
+            conn.setRequestProperty("versionCode", "1");
+            conn.setRequestProperty("app-type", "roewe");
+            conn.setRequestProperty("sign", sign);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.getBytes(StandardCharsets.UTF_8));
+            }
+            int code = conn.getResponseCode();
+            InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            String resp = in == null ? "" : readStream(in);
+            if (code == 200 && !TextUtils.isEmpty(resp)) {
+                String vin = findVin(new JSONObject(resp));
+                if (!TextUtils.isEmpty(vin)) return vin;
+            }
+            progress("车辆列表 HTTP " + code + (TextUtils.isEmpty(resp) ? "" : "：" + brief(maskVin(resp))));
+        } catch (Throwable t) {
+            progress("自动获取 VIN 失败：" + (t.getMessage() == null ? t.toString() : t.getMessage()));
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return "";
+    }
+
+    /** 与官方 App 的 BanmaRequestSignInterceptor/SignUtils 一致：排序后拼接，HmacSHA256，Base64(NO_WRAP)。 */
+    private static String banmaSign(String appType, String path, String ts, String data, String key) throws Exception {
+        ArrayList<String> parts = new ArrayList<>();
+        parts.add(path);
+        parts.add(ts);
+        parts.add(data);
+        parts.add(appType);
+        Collections.sort(parts);
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) sb.append(p);
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        return Base64.encodeToString(mac.doFinal(sb.toString().getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+    }
+
+    private static String findVin(Object o) {
+        if (o instanceof JSONObject) {
+            JSONObject j = (JSONObject) o;
+            Iterator<String> it = j.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                Object v = j.opt(k);
+                if (v instanceof String && k.toLowerCase(Locale.ROOT).contains("vin")) {
+                    String s = (String) v;
+                    if (isVin(s)) return s;
+                }
+                String r = findVin(v);
+                if (!TextUtils.isEmpty(r)) return r;
+            }
+        } else if (o instanceof JSONArray) {
+            JSONArray a = (JSONArray) o;
+            for (int i = 0; i < a.length(); i++) {
+                String r = findVin(a.opt(i));
+                if (!TextUtils.isEmpty(r)) return r;
+            }
+        } else if (o instanceof String && isVin((String) o)) {
+            return (String) o;
+        }
+        return "";
+    }
+
+    private static boolean isVin(String s) {
+        return s != null && s.matches("[A-HJ-NPR-Z0-9]{17}");
+    }
+
+    private static String maskVin(String s) {
+        return s == null ? "" : s.replaceAll("[A-HJ-NPR-Z0-9]{17}", "***");
     }
 
     // ---------------- 网络 ----------------

@@ -22,6 +22,8 @@ def saicUserId = cfg('SAIC_USER_ID')
 def vcAppKey = cfg('APP_KEY')
 def vcAppSecret = cfg('APP_SECRET')
 def vcPksk = cfg('PKSK_HEX')
+// 荣威官方 App 的 Banma 请求签名私钥，仅用于登录后自动拉取账号车辆列表
+def banmaSignKey = cfg('BANMA_SIGN_KEY')
 
 android {
     namespace 'com.nixer.carunlocker'
@@ -41,6 +43,7 @@ android {
         buildConfigField "String", "VC_APP_KEY", "\"${vcAppKey}\""
         buildConfigField "String", "VC_APP_SECRET", "\"${vcAppSecret}\""
         buildConfigField "String", "VC_PKSK_HEX", "\"${vcPksk}\""
+        buildConfigField "String", "BANMA_SIGN_KEY", "\"${banmaSignKey}\""
     }
 
     buildFeatures {

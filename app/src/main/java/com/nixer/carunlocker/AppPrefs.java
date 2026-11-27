@@ -51,6 +51,8 @@ public final class AppPrefs {
     // 登录时自动生成并持久化的设备标识（可在 local.properties 覆盖）
     public static final String K_SAIC_UUID = "saic_uuid";
     public static final String K_SAIC_DEVICE_ID = "saic_device_id";
+    // 登录后自动获取并缓存的 VIN
+    public static final String K_SAIC_VIN = "saic_vin";
 
     public static int getInt(Context c, String key, int def) {
         String v = get(c, key);
