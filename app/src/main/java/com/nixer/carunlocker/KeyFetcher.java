@@ -75,6 +75,11 @@ public final class KeyFetcher {
     private final Callback cb;
     private final Handler main = new Handler(Looper.getMainLooper());
 
+    // 本次登录使用的设备标识；为空时自动生成并持久化
+    private String uuid;
+    private String deviceId;
+    private String vin;
+
     public KeyFetcher(Context ctx, String phone, String vcode, Callback cb) {
         this.ctx = ctx.getApplicationContext();
         this.phone = phone;
@@ -99,6 +104,21 @@ public final class KeyFetcher {
             if (TextUtils.isEmpty(BuildConfig.VC_APP_KEY) || TextUtils.isEmpty(BuildConfig.VC_PKSK_HEX)) {
                 throw new IllegalStateException("本机 local.properties 缺少 APP_KEY/APP_SECRET/PKSK_HEX，无法登录取钥匙");
             }
+            vin = BuildConfig.SAIC_VIN;
+            if (TextUtils.isEmpty(vin)) {
+                throw new IllegalStateException("未配置车架号 VIN，请在 local.properties 填写 SAIC_VIN");
+            }
+            // uuid 可以随机生成；deviceId 决定钥匙归属，首次登录时生成并保存
+            uuid = nonEmpty(BuildConfig.SAIC_UUID, AppPrefs.get(ctx, AppPrefs.K_SAIC_UUID));
+            if (TextUtils.isEmpty(uuid)) {
+                uuid = randomHex(20);
+                AppPrefs.set(ctx, AppPrefs.K_SAIC_UUID, uuid);
+            }
+            deviceId = nonEmpty(BuildConfig.SAIC_DEVICE_ID, AppPrefs.get(ctx, AppPrefs.K_SAIC_DEVICE_ID));
+            if (TextUtils.isEmpty(deviceId)) {
+                deviceId = randomHex(16);
+                AppPrefs.set(ctx, AppPrefs.K_SAIC_DEVICE_ID, deviceId);
+            }
             progress("1/5 短信验证码登录…");
             JSONObject loginBody = new JSONObject();
             loginBody.put("appType", "mp4roeweapp");
@@ -111,7 +131,7 @@ public final class KeyFetcher {
             loginBody.put("phoneName", "");
             loginBody.put("platformType", "Android");
             loginBody.put("sid", "");
-            loginBody.put("uuid", BuildConfig.SAIC_UUID);
+            loginBody.put("uuid", uuid);
             loginBody.put("vcode", vcode);
             JSONObject login = new JSONObject(postForm(LOGIN_URL, loginBody.toString()));
             JSONObject loginData = login.optJSONObject("data");
@@ -124,7 +144,7 @@ public final class KeyFetcher {
 
             JSONObject zoneBody = new JSONObject();
             zoneBody.put("brandCode", "1");
-            zoneBody.put("deviceId", BuildConfig.SAIC_DEVICE_ID);
+            zoneBody.put("deviceId", deviceId);
             zoneBody.put("token", toc);
             zoneBody.put("types", new JSONArray().put(1).put(2));
             JSONObject zone = new JSONObject(postForm(ZONE_URL, zoneBody.toString()));
@@ -140,8 +160,8 @@ public final class KeyFetcher {
             JSONObject queryBody = new JSONObject();
             queryBody.put("phoneModel", "NX769J");
             queryBody.put("phoneBrand", "nubia");
-            queryBody.put("vin", BuildConfig.SAIC_VIN);
-            queryBody.put("deviceId", BuildConfig.SAIC_DEVICE_ID);
+            queryBody.put("vin", vin);
+            queryBody.put("deviceId", deviceId);
             HttpResp queryResp = postZone(PATH_QUERY_KEY, queryBody.toString(), zoneToken);
             JSONObject query = new JSONObject(queryResp.body);
             JSONObject queryData = query.optJSONObject("data");
@@ -154,7 +174,7 @@ public final class KeyFetcher {
             KeyPair ephemeral = generateP256();
             String ptpk = hex(rawPublicPoint((ECPublicKey) ephemeral.getPublic()));
             byte[] signed = signWithPksk(concat(hexToBytes(ptpk),
-                    (BuildConfig.SAIC_VIN + userId + keyId).getBytes(StandardCharsets.UTF_8)));
+                    (vin + userId + keyId).getBytes(StandardCharsets.UTF_8)));
             JSONObject dlBody = new JSONObject();
             dlBody.put("ptpks", hex(signed));
             dlBody.put("keyId", keyId);
@@ -245,7 +265,7 @@ public final class KeyFetcher {
         }
     }
 
-    private static HttpResp postZone(String path, String json, String zoneToken) throws Exception {
+    private HttpResp postZone(String path, String json, String zoneToken) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(VC_URL + path).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
@@ -284,7 +304,7 @@ public final class KeyFetcher {
         return sb.toString();
     }
 
-    private static Map<String, String> zoneHeaders(String path, String token) throws Exception {
+    private Map<String, String> zoneHeaders(String path, String token) throws Exception {
         String ts = String.valueOf(System.currentTimeMillis());
         String nonce = ts + randomNonce(20);
         String canonical = nonce + "\n" + ts + "\nPOST\n" + path + "\n" + BuildConfig.VC_APP_KEY;
@@ -300,8 +320,8 @@ public final class KeyFetcher {
         h.put("x-sign", sign);
         h.put("path", path);
         h.put("x-token", "Bearer " + token);
-        h.put("vin", BuildConfig.SAIC_VIN);
-        h.put("t-deviceid", BuildConfig.SAIC_DEVICE_ID);
+        h.put("vin", vin);
+        h.put("t-deviceid", deviceId);
         h.put("t-devicetype", "2");
         h.put("t-deviceversion", "16");
         h.put("t-devicename", "NX769J");
@@ -433,6 +453,12 @@ public final class KeyFetcher {
         StringBuilder sb = new StringBuilder(b.length * 2);
         for (byte v : b) sb.append(String.format(Locale.ROOT, "%02x", v & 0xFF));
         return sb.toString();
+    }
+
+    private static String randomHex(int bytes) {
+        byte[] b = new byte[bytes];
+        new SecureRandom().nextBytes(b);
+        return hex(b);
     }
 
     private static byte[] hexToBytes(String s) {

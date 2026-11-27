@@ -19,7 +19,9 @@ Gitee 只保留 1.0 源码和 1.0 / 2.0 的安装包；2.0 的源码和说明以
 | --- | --- |
 | 手机号 | 用户在登录框输入 |
 | 短信验证码 | 用户输入 |
-| zone token / zone userId | 登录接口返回 |
+| 登录 uuid | 首次登录自动生成并保存，可在 `local.properties` 覆盖 |
+| 钥匙绑定 deviceId | 首次登录自动生成并保存；换值会生成新钥匙 |
+| zone token / zone userId | 登录接口返回，无需填写 |
 | keyId | 申请钥匙接口返回 |
 | 车辆 BLE 钥匙 `ks / kr` | 下载钥匙接口返回并解密 |
 | 车辆 BLE MAC / 名称 | 钥匙 JSON 返回，或在 App 内扫描选择 |
@@ -33,10 +35,11 @@ Gitee 只保留 1.0 源码和 1.0 / 2.0 的安装包；2.0 的源码和说明以
 | `APP_KEY` | 荣威官方 App 的接口 appKey | 官方 App / 反编译 |
 | `APP_SECRET` | 接口签名密钥 | 官方 App / 反编译 |
 | `PKSK_HEX` | 下载钥匙时签名用的私钥 | 官方 App / 反编译 |
-| `SAIC_UUID` | 登录设备 UUID | 官方 App 的设备信息 |
-| `SAIC_DEVICE_ID` | 设备 ID，用于钥匙绑定 | 官方 App 的设备信息 |
 | `SAIC_VIN` | 车架号 | 行驶证 / 车辆 |
-| `SAIC_USER_ID` | 账号 ID，可选兜底 | 登录响应 |
+
+`SAIC_UUID / SAIC_DEVICE_ID / SAIC_USER_ID` 不需要手动填写：首次登录会自动生成并保存，
+`userId` 由 zone 登录响应返回。只有想复用官方 App 里已经绑定的钥匙时，才需要把官方 App
+的 deviceId 填到 `SAIC_DEVICE_ID`。
 
 `local.properties` 只写字段名，值由使用者自己填写：
 
@@ -45,10 +48,11 @@ sdk.dir=C\:\\Android\\Sdk
 APP_KEY=
 APP_SECRET=
 PKSK_HEX=
-SAIC_UUID=
-SAIC_DEVICE_ID=
 SAIC_VIN=
-SAIC_USER_ID=
+
+# 可选：复用官方 App 已绑定的钥匙时才填
+# SAIC_DEVICE_ID=
+# SAIC_UUID=
 ```
 
 ## 构建

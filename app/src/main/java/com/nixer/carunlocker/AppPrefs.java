@@ -48,6 +48,10 @@ public final class AppPrefs {
     public static final String K_BLE_MAC = "runtime_ble_mac";
     public static final String K_KEY_SOURCE = "key_source";
 
+    // 登录时自动生成并持久化的设备标识（可在 local.properties 覆盖）
+    public static final String K_SAIC_UUID = "saic_uuid";
+    public static final String K_SAIC_DEVICE_ID = "saic_device_id";
+
     public static int getInt(Context c, String key, int def) {
         String v = get(c, key);
         if (v == null || v.length() == 0) return def;
