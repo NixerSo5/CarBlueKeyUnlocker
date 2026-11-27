@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <com.google.android.material.textview.MaterialTextView
+            android:id="@+id/tvSettingsInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLoginSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="46dp"
+            android:text="登录并获取钥匙（短信验证码）"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:backgroundTint="#5E35B1"
+            app:cornerRadius="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnModeSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:minHeight="46dp"
+            android:text="扫描模式：分层"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:backgroundTint="#00695C"
+            app:cornerRadius="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDistanceSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:minHeight="46dp"
+            android:text="距离设置（五档 + 手动）"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:backgroundTint="#1565C0"
+            app:cornerRadius="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRestartSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:minHeight="46dp"
+            android:text="重启守护服务"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:backgroundTint="@color/accent"
+            app:cornerRadius="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDeviceSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:minHeight="46dp"
+            android:text="手动选择蓝牙设备（通常钥匙登录后自动识别）"
+            android:textAllCaps="false"
+            android:textSize="13sp"
+            app:backgroundTint="#455A64"
+            app:cornerRadius="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLogSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:minHeight="46dp"
+            android:text="查看日志（简单 / 详细）"
+            android:textAllCaps="false"
+            android:textSize="14sp"
+            app:backgroundTint="#37474F"
+            app:cornerRadius="4dp" />
+
+        <CheckBox
+            android:id="@+id/cbDetailLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="记录详细日志（关闭时只写简单日志）"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+</ScrollView>

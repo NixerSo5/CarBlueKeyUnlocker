@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 所有敏感配置只从本机 local.properties 读取（该文件已被 git 忽略）。
+// 仓库内不包含任何真实手机号、VIN、设备 ID、车辆 MAC 或钥匙材料。
+def localProps = new Properties()
+def localFile = rootProject.file('local.properties')
+if (localFile.exists()) {
+    localFile.withInputStream { localProps.load(it) }
+}
+// 登录/取钥匙所需的厂商接口参数（仅本机构建使用）
+def saicUuid = localProps.getProperty('SAIC_UUID', '')
+def saicDeviceId = localProps.getProperty('SAIC_DEVICE_ID', '')
+def saicVin = localProps.getProperty('SAIC_VIN', '')
+def saicUserId = localProps.getProperty('SAIC_USER_ID', '')
+def vcAppKey = localProps.getProperty('APP_KEY', '')
+def vcAppSecret = localProps.getProperty('APP_SECRET', '')
+def vcPksk = localProps.getProperty('PKSK_HEX', '')
+
+android {
+    namespace 'com.nixer.carunlocker'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.nixer.carunlocker'
+        minSdk 26
+        targetSdk 35
+        versionCode 25
+        versionName '1.5-t26'
+
+        buildConfigField "String", "SAIC_UUID", "\"${saicUuid}\""
+        buildConfigField "String", "SAIC_DEVICE_ID", "\"${saicDeviceId}\""
+        buildConfigField "String", "SAIC_VIN", "\"${saicVin}\""
+        buildConfigField "String", "SAIC_USER_ID", "\"${saicUserId}\""
+        buildConfigField "String", "VC_APP_KEY", "\"${vcAppKey}\""
+        buildConfigField "String", "VC_APP_SECRET", "\"${vcAppSecret}\""
+        buildConfigField "String", "VC_PKSK_HEX", "\"${vcPksk}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.material:material:1.12.0'
+}

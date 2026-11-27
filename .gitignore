@@ -1,0 +1,46 @@
+# Gradle / build output
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Local config (contains machine-specific SDK path)
+local.properties
+
+# Signing keys
+*.jks
+*.keystore
+debug.keystore
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Built APKs (in case copied outside build/)
+*.apk
+
+# Reverse-engineering handoff bundles (may contain sensitive analysis)
+CarUnlocker-handoff-20261126.zip
+CarUnlocker-handoff-20261126/
+reverse/
+soprobe/
+HANDOFF.md
+
+# Local distribution / built packages
+dist/
+
+# Handoff archives / backups (may contain keys)
+CarUnlocker-handoff-*.7z
+local.properties.bak
+local.properties.*

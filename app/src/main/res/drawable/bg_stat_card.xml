@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 半透明底，让背后的绿色光晕透出来 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#7A0B0E0F" />
+            <corners android:radius="20dp" />
+            <stroke android:width="1dp" android:color="#2EFFFFFF" />
+        </shape>
+    </item>
+    <!-- 底部中间打灯：磨砂玻璃被下方光源照亮 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="radial"
+                android:centerX="0.5"
+                android:centerY="1.02"
+                android:gradientRadius="120dp"
+                android:startColor="#40D6FFEA"
+                android:centerColor="#1AD6FFEA"
+                android:endColor="#00D6FFEA" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+    <!-- 顶部极细高光 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="270"
+                android:startColor="#1FFFFFFF"
+                android:centerColor="#00FFFFFF"
+                android:endColor="#00FFFFFF" />
+            <corners android:radius="20dp" />
+        </shape>
+    </item>
+</layer-list>

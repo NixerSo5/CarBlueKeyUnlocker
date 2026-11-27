@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 绿色辉光：按钮四周的柔光 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="radial"
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:gradientRadius="88dp"
+                android:startColor="#803BE383"
+                android:centerColor="#333BE383"
+                android:endColor="#003BE383" />
+        </shape>
+    </item>
+</layer-list>

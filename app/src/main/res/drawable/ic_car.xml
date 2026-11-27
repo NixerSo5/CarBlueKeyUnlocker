@@ -1,0 +1,54 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="210dp"
+    android:height="85dp"
+    android:viewportWidth="320"
+    android:viewportHeight="130">
+    <!-- 车身 -->
+    <path
+        android:fillColor="#1F2937"
+        android:strokeColor="#38FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M24,84 C24,72 34,65 58,61 L104,34 C122,25 148,23 186,25 C220,27 245,42 266,56 L292,63 C302,66 306,74 305,84 L301,93 C299,97 293,98 286,98 L268,98 A24,24 0 0 0 220,98 L104,98 A24,24 0 0 0 56,98 L34,98 C27,98 24,93 24,84 Z" />
+    <!-- 车窗 -->
+    <path
+        android:fillColor="#1E293B"
+        android:strokeColor="#1FFFFFFF"
+        android:strokeWidth="1"
+        android:pathData="M108,38 L184,31 C212,31 232,42 248,56 L96,58 Z" />
+    <!-- B柱 -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#111827"
+        android:strokeWidth="4"
+        android:pathData="M164,32 L162,57" />
+    <!-- 前大灯 -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M278,65 L298,69 L292,74 L274,71 Z" />
+    <!-- 尾灯 -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M26,68 L40,66 L38,73 L25,74 Z" />
+    <!-- 前轮 -->
+    <path
+        android:fillColor="#090D11"
+        android:strokeColor="#374151"
+        android:strokeWidth="2"
+        android:pathData="M224,98 A20,20 0 1,0 264,98 A20,20 0 1,0 224,98 Z" />
+    <path
+        android:fillColor="#1F2937"
+        android:strokeColor="#9CA3AF"
+        android:strokeWidth="1.5"
+        android:pathData="M233,98 A11,11 0 1,0 255,98 A11,11 0 1,0 233,98 Z" />
+    <!-- 后轮 -->
+    <path
+        android:fillColor="#090D11"
+        android:strokeColor="#374151"
+        android:strokeWidth="2"
+        android:pathData="M60,98 A20,20 0 1,0 100,98 A20,20 0 1,0 60,98 Z" />
+    <path
+        android:fillColor="#1F2937"
+        android:strokeColor="#9CA3AF"
+        android:strokeWidth="1.5"
+        android:pathData="M69,98 A11,11 0 1,0 91,98 A11,11 0 1,0 69,98 Z" />
+</vector>
