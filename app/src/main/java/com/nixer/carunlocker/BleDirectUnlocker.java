@@ -44,6 +44,10 @@ public final class BleDirectUnlocker {
         default void onDoorState(boolean locked) {}
         /** 解锁成功后的保活连接结束（正常到期或车端断开），不改变解锁结果。 */
         default void onKeepAliveClosed() {}
+        /** 预连接已认证，等待靠近后执行解锁。 */
+        default void onReady() {}
+        /** 预连接被取消/超时，未执行任何解锁。 */
+        default void onPrepareClosed() {}
     }
 
     private static final UUID SVC = UUID.fromString("0000FFF0-0000-1000-8000-00805f9b34fb");
@@ -64,6 +68,8 @@ public final class BleDirectUnlocker {
     private static final long KEEP_ALIVE_MS = 5 * 60_000;
     /** 查询车辆锁状态的等待时间；超时或无法解析就按兜底直接发 RKE。 */
     private static final long STATUS_QUERY_WAIT_MS = 1200;
+    /** 预连接认证成功后等待用户靠近的最长时间。 */
+    private static final long PREPARE_TIMEOUT_MS = 120_000;
 
     private final Context ctx;
     private final String mac;
@@ -127,6 +133,25 @@ public final class BleDirectUnlocker {
     private boolean keepAliveActive;
     private final Runnable keepAliveExpiry = this::expireKeepAlive;
 
+    /** 预连接：先完成认证并保持连接，等用户靠近再发 RKE。 */
+    private boolean prepareOnly;
+    private boolean readyForAction;
+    private final Runnable overallTimeout = () -> {
+        if (!finished && !sessionDone && !readyForAction) {
+            finish(false, (OVERALL_TIMEOUT_MS / 1000) + "s 内车未进入钥匙会话。请触摸门把手或按遥控钥匙唤醒车辆；车醒后本 App 会自动完成认证" + actionName() + "，无需上汽 App，也不需要网络。");
+        }
+    };
+    private final Runnable prepareTimeout = this::onPrepareTimeout;
+    private void onPrepareTimeout() {
+        if (finished || !prepareOnly) return;
+        log("预连接等待靠近超时，断开连接");
+        prepareOnly = false;
+        readyForAction = false;
+        finished = true;
+        cleanup();
+        cb.onPrepareClosed();
+    }
+
     public BleDirectUnlocker(Context ctx, String mac, int mode, Callback cb) {
         this.ctx = ctx.getApplicationContext();
         this.mac = normalizeMac(mac);
@@ -148,16 +173,60 @@ public final class BleDirectUnlocker {
             return;
         }
         authRetries = 0;
-        log("开始直接" + actionName() + "，目标 " + mac);
-        log("存在广播已启动，立即连接车辆并持续握手");
-        handler.postDelayed(() -> finish(false,
-                (OVERALL_TIMEOUT_MS / 1000) + "s 内车未进入钥匙会话。请触摸门把手或按遥控钥匙唤醒车辆；车醒后本 App 会自动完成认证" + actionName() + "，无需上汽 App，也不需要网络。"),
-                OVERALL_TIMEOUT_MS);
+        log("开始直接" + (prepareOnly ? "预连接" : actionName()) + "，目标 " + mac);
+        if (prepareOnly) {
+            log("提前连接车辆并完成认证，等待靠近后再解锁");
+            handler.postDelayed(prepareTimeout, PREPARE_TIMEOUT_MS);
+        } else {
+            log("存在广播已启动，立即连接车辆并持续握手");
+        }
+        handler.postDelayed(overallTimeout, OVERALL_TIMEOUT_MS);
         startWakeAdvertising();
         handler.postDelayed(this::connect, WAKE_DELAY_MS);
     }
 
+    public void setPrepareOnly(boolean prepareOnly) {
+        this.prepareOnly = prepareOnly;
+    }
+
+    public boolean isReadyForAction() {
+        return !finished && readyForAction && connected && gatt != null && writeChar != null
+                && k2 != null && !reconnecting && !writing;
+    }
+
+    /** 用户已靠近：在预连接会话上立即执行解锁。 */
+    public boolean requestUnlock() {
+        if (finished || !readyForAction) return false;
+        prepareOnly = false;
+        readyForAction = false;
+        handler.removeCallbacks(prepareTimeout);
+        mode = MODE_UNLOCK;
+        statusQuerySent = false;
+        statusResponded = false;
+        statusLocked = null;
+        rkeSent = false;
+        log("已靠近，使用预连接立即发送解锁");
+        queryLockStatus();
+        return true;
+    }
+
+    /** 取消预连接（用户没有靠近/走远），不产生解锁失败提示。 */
+    public void cancelPrepare() {
+        if (!prepareOnly) return;
+        prepareOnly = false;
+        readyForAction = false;
+        if (!finished) {
+            finished = true;
+            cleanup();
+        }
+        cb.onPrepareClosed();
+    }
+
     public void stop() {
+        if (prepareOnly) {
+            cancelPrepare();
+            return;
+        }
         if (!finished) {
             finished = true;
             cleanup();
@@ -636,6 +705,13 @@ public final class BleDirectUnlocker {
         // 官方 VEHICLE_APDU_EXECUTION_RESULT 应答：000100 + TLV(02,00)
         enqueue(frame(0x00, 0, concat(hexToBytes("000100"), hexToBytes("020100"))));
         if (code == 0x00) {
+            if (prepareOnly) {
+                readyForAction = true;
+                handler.removeCallbacks(overallTimeout);
+                log("预连接认证成功，保持连接等待靠近");
+                cb.onReady();
+                return;
+            }
             log("认证成功，先查询车辆锁状态");
             queryLockStatus();
         } else {

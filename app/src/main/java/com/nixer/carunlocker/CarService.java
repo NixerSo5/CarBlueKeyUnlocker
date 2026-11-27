@@ -68,9 +68,14 @@ public class CarService extends Service {
     public static final String ACTION_RESTART_SCAN = "com.nixer.carunlocker.action.RESTART_SCAN";
     public static final String ACTION_RELOAD_KEYS = "com.nixer.carunlocker.action.RELOAD_KEYS";
 
-    private BleDirectUnlocker bleUnlocker;  // 当前正在执行解锁/锁车的会话
+    private BleDirectUnlocker bleUnlocker;  // 当前正在执行解锁/锁车的会话（也可能是预连接）
     private BleDirectUnlocker bleSession;   // 解锁成功后保活的已认证会话（一键启动 + 走远直接锁车）
     private boolean bleRunning = false;
+    private boolean preparing = false;
+    private boolean unlockWhenReady = false;
+    private boolean prepareUnlockRequested = false;
+    private int prepareConfirm = 0;
+    private long lastPrepareAt = 0;
     private boolean sessionLockInProgress = false;
     private boolean lockNeeded = false;  // 本 App 解锁成功、且还没成功/放弃锁车
     private long unlockedAtMs = 0;
@@ -335,10 +340,16 @@ public class CarService extends Service {
             if (rssi >= nearRssi) {
                 awayCount = 0;
                 farSinceMs = 0;
+                prepareConfirm = 0;
                 nearCount++;
                 if (nearCount >= NEAR_CONFIRM) {
                     nearCount = 0;
-                    if (bleRunning || bleSession != null) return; // 已连接/正在操作，不用重复解锁
+                    if (preparing && bleUnlocker != null) {
+                        unlockWhenReady = true;
+                        if (bleUnlocker.isReadyForAction()) doPreparedUnlock();
+                        return;
+                    }
+                    if (bleRunning || bleSession != null || bleUnlocker != null) return; // 已连接/正在操作，不用重复解锁
                     if (now - lastAutoUnlock < autoCooldownMs) return;
                     lastAutoUnlock = now;
                     String seen = new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
@@ -346,8 +357,22 @@ public class CarService extends Service {
                     log("靠近解锁: " + rssi + "dBm");
                     startBleAction(rssi, name, BleDirectUnlocker.MODE_UNLOCK, false);
                 }
+            } else if (rssi >= prepareRssi()) {
+                // 还没到解锁距离，但已经进入可连接范围：提前连接+认证，靠近时直接发 RKE
+                nearCount = 0;
+                awayCount = 0;
+                farSinceMs = 0;
+                if (!preparing && !bleRunning && bleSession == null && bleUnlocker == null) {
+                    prepareConfirm++;
+                    if (prepareConfirm >= 2) {
+                        prepareConfirm = 0;
+                        startPrepareSession(rssi, name);
+                    }
+                }
             } else if (rssi <= farRssi) {
                 nearCount = 0;
+                prepareConfirm = 0;
+                if (preparing) cancelPrepareSession("信号已走远");
                 if (bleRunning || sessionLockInProgress) return;
                 // 只锁本 App 解锁过的车：车端原本就锁着时不再发上锁指令（真车会返回 01 并反复重试）
                 if (!lockNeeded) return;
@@ -750,11 +775,139 @@ public class CarService extends Service {
     }
 
     /** 靠近解锁 / 远离锁车：自己连车、自己认证（不经过上汽 App）。 */
+    private int prepareRssi() {
+        return Math.max(nearRssi - 12, -90);
+    }
+
+    /**
+     * 提前连接：在还没到解锁距离时先完成 BLE 认证并保持连接。
+     * 真正靠近时只在已有会话上发 RKE，避免用户站在车边等握手。
+     */
+    private void startPrepareSession(int rssi, String name) {
+        if (bleUnlocker != null || bleRunning || bleSession != null) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastPrepareAt < 15_000) return;
+        lastPrepareAt = now;
+        preparing = true;
+        unlockWhenReady = false;
+        prepareUnlockRequested = false;
+        AppPrefs.set(this, AppPrefs.K_BLE_STATE, "预连接中…");
+        log("提前连接车辆（" + rssi + "dBm / " + name + "），认证后等待靠近解锁");
+        BleDirectUnlocker unlocker = new BleDirectUnlocker(this, targetMac, BleDirectUnlocker.MODE_UNLOCK,
+                new BleDirectUnlocker.Callback() {
+            @Override public void log(String msg) { CarService.this.log("[BLE] " + msg); }
+
+            @Override public void onDoorState(boolean locked) {
+                AppPrefs.set(CarService.this, AppPrefs.K_CAR_DOOR, locked ? "locked" : "unlocked");
+            }
+
+            @Override public void onReady() {
+                log("预连接已就绪，等待靠近");
+                if (unlockWhenReady) {
+                    doPreparedUnlock();
+                } else {
+                    AppPrefs.set(CarService.this, AppPrefs.K_BLE_STATE, "已就绪，等待靠近");
+                }
+            }
+
+            @Override public void onPrepareClosed() {
+                if (prepareUnlockRequested) return;
+                preparing = false;
+                unlockWhenReady = false;
+                bleUnlocker = null;
+                AppPrefs.set(CarService.this, AppPrefs.K_BLE_STATE, "待机");
+                log("预连接已结束，等待下次靠近");
+            }
+
+            @Override public void onFinished(boolean success, String detail) {
+                if (!prepareUnlockRequested) {
+                    // 预连接阶段失败/超时：不显示“解锁失败”
+                    preparing = false;
+                    unlockWhenReady = false;
+                    bleUnlocker = null;
+                    AppPrefs.set(CarService.this, AppPrefs.K_BLE_STATE, "待机");
+                    log("预连接未完成：" + detail);
+                    startScan();
+                    return;
+                }
+                preparing = false;
+                bleRunning = false;
+                if (success) {
+                    bleSession = bleUnlocker;
+                    lockNeeded = true;
+                    unlockedAtMs = SystemClock.elapsedRealtime();
+                    AppPrefs.set(CarService.this, AppPrefs.K_CAR_CONNECTED, "1");
+                } else {
+                    bleUnlocker = null;
+                    bleSession = null;
+                    AppPrefs.set(CarService.this, AppPrefs.K_CAR_CONNECTED, "0");
+                }
+                AppPrefs.set(CarService.this, AppPrefs.K_BLE_STATE,
+                        (success ? "解锁成功" : "解锁失败") + " · " + detail);
+                log("BLE: " + (success ? "解锁成功" : "解锁失败") + " :: " + detail);
+                startScan();
+            }
+
+            @Override public void onKeepAliveClosed() {
+                bleRunning = false;
+                bleUnlocker = null;
+                bleSession = null;
+                preparing = false;
+                lockNeeded = false;
+                AppPrefs.set(CarService.this, AppPrefs.K_CAR_CONNECTED, "0");
+                log("BLE: 解锁已完成，保活连接结束（车辆可能自动上锁）");
+                startScan();
+            }
+        });
+        unlocker.setPrepareOnly(true);
+        bleUnlocker = unlocker;
+        handler.postDelayed(unlocker::start, 300);
+    }
+
+    private void doPreparedUnlock() {
+        BleDirectUnlocker u = bleUnlocker;
+        if (u == null) return;
+        if (!u.isReadyForAction()) {
+            unlockWhenReady = true;
+            return;
+        }
+        prepareUnlockRequested = true;
+        preparing = false;
+        unlockWhenReady = false;
+        bleRunning = true;
+        AppPrefs.set(this, AppPrefs.K_BLE_STATE, "解锁中…");
+        log("已靠近，使用预连接立即解锁");
+        if (!u.requestUnlock()) {
+            prepareUnlockRequested = false;
+            preparing = true;
+            bleRunning = false;
+            unlockWhenReady = true;
+        }
+    }
+
+    private void cancelPrepareSession(String reason) {
+        BleDirectUnlocker u = bleUnlocker;
+        if (!preparing || u == null) return;
+        log("取消预连接：" + reason);
+        preparing = false;
+        unlockWhenReady = false;
+        bleUnlocker = null;
+        AppPrefs.set(this, AppPrefs.K_BLE_STATE, "待机");
+        u.cancelPrepare();
+    }
+
     private void startBleAction(int rssi, String name, final int mode, boolean manual) {
         final String actionName = mode == BleDirectUnlocker.MODE_LOCK ? "锁车" : "解锁";
         if (bleRunning) {
             log("BLE: 正在操作中，跳过本次触发");
             return;
+        }
+        if (preparing && bleUnlocker != null) {
+            BleDirectUnlocker p = bleUnlocker;
+            preparing = false;
+            unlockWhenReady = false;
+            bleUnlocker = null;
+            p.cancelPrepare();
         }
         // 新建连接前才断开旧保活连接；顺序必须在冷却判断之后，避免白断
         if (bleSession != null) {

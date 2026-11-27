@@ -2,101 +2,207 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content">
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_dark"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:paddingStart="20dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="8dp">
 
-        <com.google.android.material.textview.MaterialTextView
-            android:id="@+id/tvSettingsInfo"
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="设置"
+            android:textColor="@color/text_primary"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:text="钥匙、距离与守护服务"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp" />
+
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="14dp"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
+            android:layout_marginStart="4dp"
+            android:layout_marginBottom="8dp"
+            android:letterSpacing="0.08"
+            android:text="钥匙与连接"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnLoginSetting"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="46dp"
-            android:text="登录并获取钥匙（短信验证码）"
+            android:background="@drawable/bg_settings_primary"
+            android:drawableStart="@drawable/ic_settings"
+            android:drawablePadding="12dp"
+            android:drawableTint="#062A16"
+            android:gravity="start|center_vertical"
+            android:minHeight="54dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="登录并获取钥匙"
             android:textAllCaps="false"
-            android:textSize="14sp"
-            app:backgroundTint="#5E35B1"
-            app:cornerRadius="4dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnModeSetting"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:minHeight="46dp"
-            android:text="扫描模式：分层"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            app:backgroundTint="#00695C"
-            app:cornerRadius="4dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnDistanceSetting"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:minHeight="46dp"
-            android:text="距离设置（五档 + 手动）"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            app:backgroundTint="#1565C0"
-            app:cornerRadius="4dp" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRestartSetting"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:minHeight="46dp"
-            android:text="重启守护服务"
-            android:textAllCaps="false"
-            android:textSize="14sp"
-            app:backgroundTint="@color/accent"
-            app:cornerRadius="4dp" />
+            android:textColor="#062A16"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            app:backgroundTint="@null"
+            app:cornerRadius="14dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnDeviceSetting"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:minHeight="46dp"
-            android:text="手动选择蓝牙设备（通常钥匙登录后自动识别）"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_row"
+            android:drawableStart="@drawable/ic_car_small"
+            android:drawablePadding="12dp"
+            android:drawableTint="@color/accent"
+            android:gravity="start|center_vertical"
+            android:minHeight="54dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="选择车辆蓝牙"
             android:textAllCaps="false"
-            android:textSize="13sp"
-            app:backgroundTint="#455A64"
-            app:cornerRadius="4dp" />
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            app:backgroundTint="@null"
+            app:cornerRadius="14dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="8dp"
+            android:letterSpacing="0.08"
+            android:text="扫描与距离"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnModeSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_settings_row"
+            android:drawableStart="@drawable/ic_signal"
+            android:drawablePadding="12dp"
+            android:drawableTint="@color/accent"
+            android:gravity="start|center_vertical"
+            android:minHeight="54dp"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="10dp"
+            android:text="扫描模式：分层"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            app:backgroundTint="@null"
+            app:cornerRadius="14dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDistanceSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_row"
+            android:drawableStart="@drawable/ic_signal"
+            android:drawablePadding="12dp"
+            android:drawableTint="@color/accent"
+            android:gravity="start|center_vertical"
+            android:minHeight="54dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="感应距离"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            app:backgroundTint="@null"
+            app:cornerRadius="14dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="18dp"
+            android:layout_marginBottom="8dp"
+            android:letterSpacing="0.08"
+            android:text="服务与诊断"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRestartSetting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_settings_row"
+            android:drawableStart="@drawable/ic_shield"
+            android:drawablePadding="12dp"
+            android:drawableTint="@color/accent"
+            android:gravity="start|center_vertical"
+            android:minHeight="54dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="重启守护服务"
+            android:textAllCaps="false"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            app:backgroundTint="@null"
+            app:cornerRadius="14dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnLogSetting"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:minHeight="46dp"
-            android:text="查看日志（简单 / 详细）"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_row"
+            android:drawableStart="@drawable/ic_bell"
+            android:drawablePadding="12dp"
+            android:drawableTint="@color/accent"
+            android:gravity="start|center_vertical"
+            android:minHeight="54dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="查看日志"
             android:textAllCaps="false"
+            android:textColor="@color/text_primary"
             android:textSize="14sp"
-            app:backgroundTint="#37474F"
-            app:cornerRadius="4dp" />
+            app:backgroundTint="@null"
+            app:cornerRadius="14dp" />
+
+        <com.google.android.material.textview.MaterialTextView
+            android:id="@+id/tvSettingsInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_details"
+            android:padding="14dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
 
         <CheckBox
             android:id="@+id/cbDetailLog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="记录详细日志（关闭时只写简单日志）"
+            android:layout_marginTop="10dp"
+            android:buttonTint="@color/accent"
+            android:text="记录详细日志"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
+            android:textSize="13sp" />
     </LinearLayout>
 </ScrollView>
+

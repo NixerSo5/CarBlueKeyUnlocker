@@ -273,11 +273,16 @@ public class MainActivity extends Activity {
         });
 
         settingsDialog = new AlertDialog.Builder(this)
-                .setTitle("设置")
                 .setView(v)
                 .setPositiveButton("关闭", null)
                 .setOnDismissListener(d -> settingsDialog = null)
-                .show();
+                .create();
+        settingsDialog.show();
+        if (settingsDialog.getWindow() != null) {
+            settingsDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            int w = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            settingsDialog.getWindow().setLayout(w, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private int clampMode(int mode) {
