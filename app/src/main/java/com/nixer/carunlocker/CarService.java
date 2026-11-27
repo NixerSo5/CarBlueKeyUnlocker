@@ -76,6 +76,8 @@ public class CarService extends Service {
     private boolean prepareUnlockRequested = false;
     private int prepareConfirm = 0;
     private long lastPrepareAt = 0;
+    private long prepareStartedAt = 0;
+    private int lastRssi = 0;
     private boolean sessionLockInProgress = false;
     private boolean lockNeeded = false;  // 本 App 解锁成功、且还没成功/放弃锁车
     private long unlockedAtMs = 0;
@@ -315,6 +317,7 @@ public class CarService extends Service {
 
             // 实时信号强度写到 prefs，界面显示
             AppPrefs.set(CarService.this, AppPrefs.K_CURRENT_RSSI, rssi + " dBm");
+            lastRssi = rssi;
             boostForTarget(); // 分层模式：扫到目标立刻升档，后续连接认证不受低功耗影响
 
             long now = SystemClock.elapsedRealtime();
@@ -336,6 +339,13 @@ public class CarService extends Service {
 
             if (now - lastSampleTime < SAMPLE_INTERVAL_MS) return; // 采样节流
             lastSampleTime = now;
+
+            // 诊断用：进入可连接范围后，每个采样点都记录 RSSI 和状态机
+            if (rssi >= prepareRssi() - 6 || preparing || bleRunning || bleUnlocker != null || bleSession != null) {
+                log("扫描采样 RSSI=" + rssi + " / near=" + nearRssi + " / pre=" + prepareRssi()
+                        + " / preparing=" + preparing + " / running=" + bleRunning
+                        + " / session=" + (bleSession != null));
+            }
 
             if (rssi >= nearRssi) {
                 awayCount = 0;
@@ -792,7 +802,8 @@ public class CarService extends Service {
         unlockWhenReady = false;
         prepareUnlockRequested = false;
         AppPrefs.set(this, AppPrefs.K_BLE_STATE, "预连接中…");
-        log("提前连接车辆（" + rssi + "dBm / " + name + "），认证后等待靠近解锁");
+        prepareStartedAt = now;
+        log("提前连接车辆：RSSI=" + rssi + "dBm / near=" + nearRssi + " / pre=" + prepareRssi() + "，先认证再等靠近");
         BleDirectUnlocker unlocker = new BleDirectUnlocker(this, targetMac, BleDirectUnlocker.MODE_UNLOCK,
                 new BleDirectUnlocker.Callback() {
             @Override public void log(String msg) { CarService.this.log("[BLE] " + msg); }
@@ -802,7 +813,8 @@ public class CarService extends Service {
             }
 
             @Override public void onReady() {
-                log("预连接已就绪，等待靠近");
+                long took = SystemClock.elapsedRealtime() - prepareStartedAt;
+                log("预连接认证完成，耗时 " + took + "ms，当前 RSSI=" + lastRssi + "，等待靠近");
                 if (unlockWhenReady) {
                     doPreparedUnlock();
                 } else {
@@ -844,7 +856,8 @@ public class CarService extends Service {
                 }
                 AppPrefs.set(CarService.this, AppPrefs.K_BLE_STATE,
                         (success ? "解锁成功" : "解锁失败") + " · " + detail);
-                log("BLE: " + (success ? "解锁成功" : "解锁失败") + " :: " + detail);
+                long took = SystemClock.elapsedRealtime() - prepareStartedAt;
+                log("BLE: " + (success ? "解锁成功" : "解锁失败") + " :: " + detail + "（提前连接后 " + took + "ms）");
                 startScan();
             }
 
@@ -876,7 +889,7 @@ public class CarService extends Service {
         unlockWhenReady = false;
         bleRunning = true;
         AppPrefs.set(this, AppPrefs.K_BLE_STATE, "解锁中…");
-        log("已靠近，使用预连接立即解锁");
+        log("已靠近触发预连接解锁：RSSI=" + lastRssi + " / 提前连接后 " + (SystemClock.elapsedRealtime() - prepareStartedAt) + "ms");
         if (!u.requestUnlock()) {
             prepareUnlockRequested = false;
             preparing = true;
@@ -888,7 +901,7 @@ public class CarService extends Service {
     private void cancelPrepareSession(String reason) {
         BleDirectUnlocker u = bleUnlocker;
         if (!preparing || u == null) return;
-        log("取消预连接：" + reason);
+        log("取消预连接：" + reason + "（已等待 " + (SystemClock.elapsedRealtime() - prepareStartedAt) + "ms）");
         preparing = false;
         unlockWhenReady = false;
         bleUnlocker = null;

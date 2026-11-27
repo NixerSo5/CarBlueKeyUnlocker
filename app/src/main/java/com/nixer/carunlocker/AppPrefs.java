@@ -85,7 +85,7 @@ public final class AppPrefs {
     /** 默认分层：低功耗待机 + 发现车/操作时升到低延迟；关闭即高灵敏常开。 */
     public static boolean powerSave(Context c) { return getBool(c, K_POWER_SAVE, true); }
 
-    public static boolean detailLog(Context c) { return getBool(c, K_DETAIL_LOG, false); }
+    public static boolean detailLog(Context c) { return getBool(c, K_DETAIL_LOG, true); }
 
     public static String targetMac(Context c) { return get(c, K_TARGET_MAC); }
     public static String targetName(Context c) { return get(c, K_TARGET_NAME); }

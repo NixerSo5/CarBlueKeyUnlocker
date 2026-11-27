@@ -21,13 +21,13 @@ import java.util.Locale;
  * 两段日志：
  * - 简单日志 carguard.log：只记关键事件（连接、握手、认证、解锁/锁车等），始终记录。
  * - 详细日志 carguard_detail.log：记录全部内容，只有开关打开时才写。
- * 两者都最多保留 1000 行，超过后覆盖最旧的行。
+ * 两者都最多保留 3000 行，超过后覆盖最旧的行。
  */
 public final class AppLog {
     private static final String TAG = "CarGuard";
     public static final String SIMPLE_FILE = "carguard.log";
     public static final String DETAIL_FILE = "carguard_detail.log";
-    private static final int MAX_LINES = 1000;
+    private static final int MAX_LINES = 3000;
 
     /** 出现在这些关键词里的消息属于“主要事件”，进简单日志。 */
     private static final String[] EVENT_KEYS = {
@@ -38,7 +38,9 @@ public final class AppLog {
             "收到 80CA", "认证结果", "认证成功", "认证失败", "s2 解密成功", "step2 已发送",
             "发送车辆状态查询", "收到车辆状态响应", "车辆锁状态", "车辆状态",
             "发送 RKE", "RKE 挑战", "解锁成功", "锁车成功", "解锁失败", "锁车失败",
-            "车端返回失败", "保活连接断开", "启动保活结束", "BLE: 开始"
+            "车端返回失败", "保活连接断开", "启动保活结束", "BLE: 开始",
+            "提前连接", "预连接", "已靠近", "扫描采样", "连接耗时", "认证耗时",
+            "GATT", "唤醒广播", "解锁请求", "取消预连接", "等待靠近", "连接尝试"
     };
 
     private AppLog() {}
@@ -97,7 +99,7 @@ public final class AppLog {
                 while ((s = r.readLine()) != null) lines.add(s);
                 r.close();
             }
-            lines.add(new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(new Date()) + " " + msg);
+            lines.add(new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(new Date()) + " " + msg);
             while (lines.size() > MAX_LINES) lines.remove(0);
             FileOutputStream out = new FileOutputStream(f, false);
             for (String s : lines) out.write((s + "\n").getBytes("UTF-8"));

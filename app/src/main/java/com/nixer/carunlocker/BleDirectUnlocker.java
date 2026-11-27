@@ -118,6 +118,8 @@ public final class BleDirectUnlocker {
     private int authRetries = 0;
 
     private long connectedAtMs = 0;
+    private long startedAtMs = 0;
+    private long readyAtMs = 0;
     /** cycleConnection() 主动断开时置位，避免 onConnectionStateChange 再排一次重连。 */
     private boolean reconnecting = false;
     private int writeFailCount = 0;
@@ -173,6 +175,7 @@ public final class BleDirectUnlocker {
             return;
         }
         authRetries = 0;
+        startedAtMs = SystemClock.elapsedRealtime();
         log("开始直接" + (prepareOnly ? "预连接" : actionName()) + "，目标 " + mac);
         if (prepareOnly) {
             log("提前连接车辆并完成认证，等待靠近后再解锁");
@@ -205,7 +208,7 @@ public final class BleDirectUnlocker {
         statusResponded = false;
         statusLocked = null;
         rkeSent = false;
-        log("已靠近，使用预连接立即发送解锁");
+        log("已靠近，使用预连接立即发送解锁（就绪后 " + (SystemClock.elapsedRealtime() - readyAtMs) + "ms / 启动后 " + (SystemClock.elapsedRealtime() - startedAtMs) + "ms）");
         queryLockStatus();
         return true;
     }
@@ -249,6 +252,7 @@ public final class BleDirectUnlocker {
         if (success) cb.onDoorState(mode == MODE_LOCK);
         if (success && mode == MODE_UNLOCK) {
             // 解锁成功后不断开：车端一键启动要求数字钥匙持续在线。
+            log("执行完成，启动后 " + (SystemClock.elapsedRealtime() - startedAtMs) + "ms");
             log("解锁成功，保持 BLE 连接 " + (KEEP_ALIVE_MS / 60_000) + " 分钟供一键启动使用");
             keepAliveActive = true;
             handler.removeCallbacks(keepAliveExpiry);
@@ -431,7 +435,7 @@ public final class BleDirectUnlocker {
             }
             BluetoothDevice device = adapter.getRemoteDevice(mac);
             connectAttempts++;
-            log("连接车辆 " + mac + "（第 " + connectAttempts + " 次）");
+            log("连接车辆 " + mac + "（第 " + connectAttempts + " 次，启动后 " + (SystemClock.elapsedRealtime() - startedAtMs) + "ms）");
             if (Build.VERSION.SDK_INT >= 23) {
                 gatt = device.connectGatt(ctx, false, gattCb, BluetoothDevice.TRANSPORT_LE);
             } else {
@@ -473,7 +477,8 @@ public final class BleDirectUnlocker {
     private final BluetoothGattCallback gattCb = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
-            log("连接状态 status=" + status + " state=" + newState);
+            log("连接状态 status=" + status + " state=" + newState
+                    + "（启动后 " + (SystemClock.elapsedRealtime() - startedAtMs) + "ms）");
             if (newState == BluetoothGatt.STATE_CONNECTED) {
                 connected = true;
                 connectedAtMs = SystemClock.elapsedRealtime();
@@ -707,12 +712,13 @@ public final class BleDirectUnlocker {
         if (code == 0x00) {
             if (prepareOnly) {
                 readyForAction = true;
+                readyAtMs = SystemClock.elapsedRealtime();
                 handler.removeCallbacks(overallTimeout);
-                log("预连接认证成功，保持连接等待靠近");
+                log("预连接认证成功，保持连接等待靠近（连接后 " + (readyAtMs - connectedAtMs) + "ms / 启动后 " + (readyAtMs - startedAtMs) + "ms）");
                 cb.onReady();
                 return;
             }
-            log("认证成功，先查询车辆锁状态");
+            log("认证成功，先查询车辆锁状态（连接后 " + (SystemClock.elapsedRealtime() - connectedAtMs) + "ms）");
             queryLockStatus();
         } else {
             retryAuth("认证失败 code=" + code + "（" + name + "）");
@@ -899,7 +905,7 @@ public final class BleDirectUnlocker {
                     tlv(0x01, new byte[]{(byte) RKE_TYPE_DOOR}));
             byte[] enc = aesEncrypt(k2, concat(vrnd, prnd), pad80(body));
             rkeSent = true;
-            log("发送 RKE 挑战请求");
+            log("发送 RKE 挑战请求（启动后 " + (SystemClock.elapsedRealtime() - startedAtMs) + "ms）");
             enqueue(frame(0x18, 0, enc));
         } catch (Throwable t) {
             finish(false, "RKE 挑战构造失败");
@@ -912,7 +918,7 @@ public final class BleDirectUnlocker {
             byte[] value = concat(new byte[]{(byte) mode}, rnd);
             byte[] body = concat(new byte[]{0x02, 0x03}, tlv(0x01, value));
             byte[] enc = aesEncrypt(k2, concat(vrnd, prnd), pad80(body));
-            log("发送 RKE " + actionName() + "指令");
+            log("发送 RKE " + actionName() + "指令（启动后 " + (SystemClock.elapsedRealtime() - startedAtMs) + "ms）");
             enqueue(frame(0x1C, 0, enc));
         } catch (Throwable t) {
             finish(false, "RKE 指令构造失败");
