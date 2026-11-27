@@ -40,6 +40,9 @@ HANDOFF.md
 # Local distribution / built packages
 dist/
 
+# Local development notes (not for the public repo)
+status.md
+
 # Handoff archives / backups (may contain keys)
 CarUnlocker-handoff-*.7z
 local.properties.bak

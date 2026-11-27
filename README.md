@@ -1,119 +1,92 @@
-# CarBlueKeyUnlocker / 蓝牙钥匙助手
+# CarBlueKeyUnlocker · 上汽荣威定制版 2.0
 
-靠近车辆时自动识别蓝牙设备并拉起指定 App，无需 Root、无需 MacroDroid。
+靠近车辆后由手机直接通过 BLE 完成认证解锁，不依赖上汽荣威 App。车辆钥匙只保存在手机本地。
 
-Automatically detect a nearby Bluetooth device and launch a chosen app when you approach your car — no root, no MacroDroid required.
+## 分支与版本
 
----
+| 分支 | 版本 | 说明 |
+| --- | --- | --- |
+| `master` | 1.0 通用版 | 靠近目标蓝牙设备时拉起指定 App，可自由选择目标应用 |
+| `rongwei` | 2.0 上汽荣威定制版 | 本分支。本机取钥匙 + BLE 直连认证解锁 |
 
-## 中文
+Gitee 只保留 1.0 源码和 1.0 / 2.0 的安装包；2.0 的源码和说明以 GitHub `rongwei` 分支为准。
 
-### 分支
+## 哪些是自动获取的
 
-| 分支 | 说明 |
+这些不需要提前写进配置，运行时会自动拿到：
+
+| 内容 | 来源 |
 | --- | --- |
-| `master` | 通用版。应用名「蓝牙钥匙助手」，可自由选择要拉起的应用。 |
-| `rongwei` | 上汽荣威定制版。应用名「07电子钥匙助手」，使用上汽图标，固定拉起 `com.saicmotor.tocapp`。 |
+| 手机号 | 用户在登录框输入 |
+| 短信验证码 | 用户输入 |
+| zone token / zone userId | 登录接口返回 |
+| keyId | 申请钥匙接口返回 |
+| 车辆 BLE 钥匙 `ks / kr` | 下载钥匙接口返回并解密 |
+| 车辆 BLE MAC / 名称 | 钥匙 JSON 返回，或在 App 内扫描选择 |
 
-两个分支使用相同的包名 `com.nixer.carunlocker`，不能同时安装；切换分支后需重新构建并安装。
+## 哪些需要自己查找或填写
 
-### 功能
+构建前在项目根目录的 `local.properties` 中填写。该文件已被 git 忽略，**绝对不要提交**。
 
-- 选择目标蓝牙设备：扫描附近 BLE 设备并保存 MAC / 名称
-- 距离灵敏度：4 挡滑块（很近 / 近 / 远 / 自定义），自定义挡可手动设置进入阈值、离开阈值、连续确认次数
-- 保活：前台服务 + 看门狗服务 + AlarmManager + 开机自启 + `START_STICKY`
-- 权限：启动时一次性申请定位、蓝牙、通知、电池优化白名单、悬浮窗权限
-- 状态显示：守护服务 / 看门狗运行状态、已发现设备数、当前信号强度、最近发现目标、拉起应用、服务启动时间
-- 文件日志：`/sdcard/Android/data/com.nixer.carunlocker/files/carguard.log`（部分 ROM 的 `logcat` 不可用）
+| 字段 | 说明 | 从哪里获取 |
+| --- | --- | --- |
+| `APP_KEY` | 荣威官方 App 的接口 appKey | 官方 App / 反编译 |
+| `APP_SECRET` | 接口签名密钥 | 官方 App / 反编译 |
+| `PKSK_HEX` | 下载钥匙时签名用的私钥 | 官方 App / 反编译 |
+| `SAIC_UUID` | 登录设备 UUID | 官方 App 的设备信息 |
+| `SAIC_DEVICE_ID` | 设备 ID，用于钥匙绑定 | 官方 App 的设备信息 |
+| `SAIC_VIN` | 车架号 | 行驶证 / 车辆 |
+| `SAIC_USER_ID` | 账号 ID，可选兜底 | 登录响应 |
 
-### 触发逻辑
+`local.properties` 只写字段名，值由使用者自己填写：
 
-1. 扫描结果匹配用户选择的目标设备（MAC 或名称）
-2. RSSI ≥ 进入阈值（默认 `-60dBm`）
-3. 连续 N 次确认（默认 2 次，采样间隔 800ms，避免瞬时抖动）
-4. 距离上次拉起超过 90 秒冷却时间
-5. RSSI 低于离开阈值（默认 `-75dBm`）时重置计数，形成迟滞防抖
+```properties
+sdk.dir=C\:\\Android\\Sdk
+APP_KEY=
+APP_SECRET=
+PKSK_HEX=
+SAIC_UUID=
+SAIC_DEVICE_ID=
+SAIC_VIN=
+SAIC_USER_ID=
+```
 
-### 构建
+## 构建
 
-- Android Studio 或命令行 Gradle Wrapper
-- AGP `8.7.3`，Gradle `8.13`，`compileSdk 35`，`minSdk 26`，`targetSdk 35`
-- Material Components `1.12.0`
+带本机配置（可以短信登录取钥匙）：
 
 ```powershell
 .\gradlew.bat assembleDebug
 ```
 
-APK 输出：`app\build\outputs\apk\debug\app-debug.apk`
+公开安全版（不读取 `local.properties` 里的任何敏感参数，产物不含登录信息）：
 
-### 使用
+```powershell
+.\gradlew.bat assembleDebug -PpublicBuild=true
+```
 
-1. 安装 APK并授予定位、蓝牙、通知权限
-2. 在系统中允许自启动、忽略电池优化（部分国产 ROM 必须手动设置，否则进程会被杀）
-3. 打开 App → 「选择蓝牙设备」→ 选中车辆蓝牙
-4. （`master` 分支）点「选择要拉起的应用」→ 搜索并选择目标 App
-5. 按需调整「距离灵敏度」
-6. 保持「守护服务 ● 运行中」即可
+> Release 中提供的 2.0 APK 使用 `-PpublicBuild=true` 构建，不包含 `APP_KEY / APP_SECRET / PKSK / SAIC_VIN / SAIC_DEVICE_ID` 等参数，因此公开版无法在本机重新登录取钥匙。需要使用完整取钥匙功能，请按上表配置后自行构建。
 
-> 该 ROM 上 BLE 首次扫描常无回调，代码中在启动 300ms 后重复调用一次 `startScan()`（不 `stopScan()`）；日志中的 `scan failed, code=1` 可忽略。
+## 使用
 
-### 免责声明
+1. 安装 APK，授予蓝牙、定位、通知权限。
+2. 在「设置 → 登录并获取钥匙」中输入手机号和短信验证码（仅完整构建可用）。
+3. 在设备列表中选择车辆蓝牙。
+4. 保持守护服务运行，靠近车辆后自动解锁；也可以在主页手动解锁 / 关锁。
 
-仅供个人学习与便利使用，请遵守当地法律法规及车辆厂商条款。作者不对误触发、车辆状态变化或任何损失负责。
+## 安全说明
+
+- 不要提交 `local.properties`、`status.md`、`reverse/`、`dist/`。
+- 车辆钥匙只保存在本机 SharedPreferences 中，不写入安装包。
+- 公开版 APK 不包含任何账号、车辆或厂商接口参数。
+- 本项目仅供个人学习与便利使用，请遵守当地法律法规及车辆厂商条款。
 
 ---
 
-## English
+## English summary
 
-### Branches
-
-| Branch | Description |
-| --- | --- |
-| `master` | Generic build. Named "蓝牙钥匙助手" (Bluetooth Key Assistant); the app to launch is fully user-selectable. |
-| `rongwei` | SAIC-specific build. Named "07电子钥匙助手", uses the SAIC icon, and always launches `com.saicmotor.tocapp`. |
-
-Both branches share the package name `com.nixer.carunlocker`, so they cannot be installed side by side. Rebuild and reinstall after switching branches.
-
-### Features
-
-- Target device selection: scan nearby BLE devices and store the chosen MAC address / name
-- Distance sensitivity: 4-step slider (Very close / Close / Far / Custom); the custom step allows manual enter/exit RSSI thresholds and confirmation count
-- Keep-alive: foreground service + watchdog service + AlarmManager + boot receiver + `START_STICKY`
-- Permissions: one-time requests for location, Bluetooth, notifications, battery-optimization exemption, and overlay
-- Status panel: service/watchdog state, discovered device count, live RSSI, last seen target, launch app, service start time
-- File logging: `/sdcard/Android/data/com.nixer.carunlocker/files/carguard.log` (some ROMs have unusable `logcat`)
-
-### Trigger logic
-
-1. A scan result matches the selected target device (MAC or name)
-2. RSSI ≥ enter threshold (default `-60dBm`)
-3. N consecutive confirmations (default 2, sampled 800ms apart to avoid flapping)
-4. More than 90 seconds since the last launch (cooldown)
-5. RSSI below the exit threshold (default `-75dBm`) resets the counter, providing hysteresis
-
-### Build
-
-- Android Studio or the Gradle wrapper
-- AGP `8.7.3`, Gradle `8.13`, `compileSdk 35`, `minSdk 26`, `targetSdk 35`
-- Material Components `1.12.0`
-
-```powershell
-.\gradlew.bat assembleDebug
-```
-
-APK output: `app\build\outputs\apk\debug\app-debug.apk`
-
-### Usage
-
-1. Install the APK and grant location, Bluetooth, and notification permissions
-2. Enable auto-start and battery-optimization exemption in system settings (required on many Chinese ROMs, otherwise the process will be killed)
-3. Open the app → "选择蓝牙设备" (Select Bluetooth device) → pick your vehicle's Bluetooth
-4. (`master` only) Tap "选择要拉起的应用" (Select app to launch) → search and pick the target app
-5. Adjust "距离灵敏度" (Distance sensitivity) as needed
-6. Keep the guard service "● 运行中" (Running)
-
-> On the target ROM the first BLE scan often produces no callbacks, so the code calls `startScan()` again 300ms later without calling `stopScan()`. `scan failed, code=1` in the log is harmless.
-
-### Disclaimer
-
-For personal learning and convenience only. Comply with local laws and vehicle manufacturer terms. The author is not responsible for accidental triggers, vehicle state changes, or any damages.
+- `master`: generic 1.0 build that launches a user-selected app near a BLE device.
+- `rongwei`: SAIC Roewe 2.0 build with local key fetching and direct BLE unlock.
+- Automatically obtained at runtime: phone/SMS code (user input), zone token, user ID, key ID, BLE key, BLE MAC.
+- Must be provided in the untracked `local.properties` when building from source: `APP_KEY`, `APP_SECRET`, `PKSK_HEX`, `SAIC_UUID`, `SAIC_DEVICE_ID`, `SAIC_VIN`, optional `SAIC_USER_ID`.
+- Public APKs are built with `-PpublicBuild=true` and contain none of the above secrets.

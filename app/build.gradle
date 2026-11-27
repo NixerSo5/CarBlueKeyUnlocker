@@ -9,14 +9,19 @@ def localFile = rootProject.file('local.properties')
 if (localFile.exists()) {
     localFile.withInputStream { localProps.load(it) }
 }
+// 公开构建：-PpublicBuild=true 时不读取本机任何敏感配置，产物不含登录参数。
+def publicBuild = project.hasProperty('publicBuild') &&
+        project.property('publicBuild').toString().equalsIgnoreCase('true')
+def cfg = { String key -> publicBuild ? '' : localProps.getProperty(key, '') }
+
 // 登录/取钥匙所需的厂商接口参数（仅本机构建使用）
-def saicUuid = localProps.getProperty('SAIC_UUID', '')
-def saicDeviceId = localProps.getProperty('SAIC_DEVICE_ID', '')
-def saicVin = localProps.getProperty('SAIC_VIN', '')
-def saicUserId = localProps.getProperty('SAIC_USER_ID', '')
-def vcAppKey = localProps.getProperty('APP_KEY', '')
-def vcAppSecret = localProps.getProperty('APP_SECRET', '')
-def vcPksk = localProps.getProperty('PKSK_HEX', '')
+def saicUuid = cfg('SAIC_UUID')
+def saicDeviceId = cfg('SAIC_DEVICE_ID')
+def saicVin = cfg('SAIC_VIN')
+def saicUserId = cfg('SAIC_USER_ID')
+def vcAppKey = cfg('APP_KEY')
+def vcAppSecret = cfg('APP_SECRET')
+def vcPksk = cfg('PKSK_HEX')
 
 android {
     namespace 'com.nixer.carunlocker'
