@@ -35,7 +35,12 @@ Gitee 只保留 1.0 源码和 1.0 / 2.0 的安装包；2.0 的源码和说明以
 | `APP_KEY` | 荣威官方 App 的接口 appKey | 官方 App / 反编译 |
 | `APP_SECRET` | 接口签名密钥 | 官方 App / 反编译 |
 | `PKSK_HEX` | 下载钥匙时签名用的私钥 | 官方 App / 反编译 |
-| `SAIC_VIN` | 车架号 | 行驶证 / 车辆 |
+| `SAIC_VIN` | 车架号 | 行驶证 / 车辆。官方 App 是登录后通过账号车辆列表接口自动获取的，本项目尚未实现该接口 |
+
+> 说明：官方 App 的 VIN 不是登录响应字段，而是登录后调用账号车辆列表接口
+> （反编译中对应 `/car/api/app/getSimpleVehicleInfo` / `VehicleInfo`）拿到当前账号绑定的车辆。
+> 本项目目前只实现了「登录 → 换 zone token → 申请钥匙 → 下载钥匙」，还没有实现车辆列表接口，
+> 所以 2.0 仍需要手动提供 VIN。
 
 `SAIC_UUID / SAIC_DEVICE_ID / SAIC_USER_ID` 不需要手动填写：首次登录会自动生成并保存，
 `userId` 由 zone 登录响应返回。只有想复用官方 App 里已经绑定的钥匙时，才需要把官方 App
