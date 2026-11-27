@@ -26,8 +26,8 @@ android {
         applicationId 'com.nixer.carunlocker'
         minSdk 26
         targetSdk 35
-        versionCode 25
-        versionName '1.5-t26'
+        versionCode 30
+        versionName '2.0'
 
         buildConfigField "String", "SAIC_UUID", "\"${saicUuid}\""
         buildConfigField "String", "SAIC_DEVICE_ID", "\"${saicDeviceId}\""
@@ -55,3 +55,4 @@ android {
 dependencies {
     implementation 'com.google.android.material:material:1.12.0'
 }
+
