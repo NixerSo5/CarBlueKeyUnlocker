@@ -60,10 +60,10 @@ public final class BleDirectUnlocker {
     public static final int MODE_UNLOCK = 0;
     public static final int MODE_LOCK = 1;
 
-    private static final long WAKE_DELAY_MS = 200;
+    private static final long WAKE_DELAY_MS = 1_000;
     private static final long OVERALL_TIMEOUT_MS = 35_000;
     /** 连上后车端这么久还不发 0208，就断开重连：车只在“新连接”上发起握手。 */
-    private static final long SILENT_RECONNECT_MS = 5_000;
+    private static final long SILENT_RECONNECT_MS = 1_500;
     /** 解锁成功后保持 GATT，覆盖上车一键启动（车端要求数字钥匙持续在线）。 */
     private static final long KEEP_ALIVE_MS = 5 * 60_000;
     /** 查询车辆锁状态的等待时间；超时或无法解析就按兜底直接发 RKE。 */

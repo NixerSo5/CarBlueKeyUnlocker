@@ -32,6 +32,7 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Date;
@@ -63,6 +64,8 @@ public class CarService extends Service {
     private static final int FAR_CONFIRM = 3;          // 连续 3 次弱信号才算走远，防口袋抖动
     private static final long LOCK_GRACE_MS = 8_000;   // 解锁后 8s 内不自动锁，避免刚开门就锁
     private static final long AUTO_COOLDOWN_MS = 8_000; // 防重复触发，默认 8s（界面可改 5~10s）
+    private static final long WALK_AWAY_QUIET_MS = 12_000; // 走远前 12s 内必须没见过较强信号：车内休息 RSSI 会抖到 -92，短尖峰不算走远
+    private static final int WALK_AWAY_STRONG_MARGIN = 10; // 距 farRssi 多少 dB 以内算“还很强”，会打断走远判定
     public static final String ACTION_MANUAL_UNLOCK = "com.nixer.carunlocker.action.MANUAL_UNLOCK";
     public static final String ACTION_MANUAL_LOCK = "com.nixer.carunlocker.action.MANUAL_LOCK";
     public static final String ACTION_RESTART_SCAN = "com.nixer.carunlocker.action.RESTART_SCAN";
@@ -78,6 +81,9 @@ public class CarService extends Service {
     private long lastPrepareAt = 0;
     private long prepareStartedAt = 0;
     private int lastRssi = 0;
+    /** 本次靠近已经解锁过：在真正走远前不再重复触发，避免坐在车里每 5 分钟又解锁一次。 */
+    private boolean unlockedForThisApproach = false;
+    private long lastStrongMs = 0;   // 最近一次较强信号（>= far+margin）的时间，用于抑制车内抖动误判走远
     private boolean sessionLockInProgress = false;
     private boolean lockNeeded = false;  // 本 App 解锁成功、且还没成功/放弃锁车
     private long unlockedAtMs = 0;
@@ -100,6 +106,9 @@ public class CarService extends Service {
     private boolean wakeAdvActive;
     private long lastWakeAdvMs;
     private boolean scanning = false;
+    private boolean bgScanning = false;
+    private PendingIntent bgScanIntent;
+    private static final String BG_SCAN_ACTION = "com.nixer.carunlocker.BG_SCAN";
     private long lastLaunch = 0;
     private final Handler handler = new Handler();
     private int scanAttempts = 0;
@@ -154,15 +163,16 @@ public class CarService extends Service {
                 if (powerSave) {
                     // 分层：低功耗扫描 + 10 秒唤醒窗口，窗口过后让 CPU 睡
                     acquireWakeLock(10_000);
-                    log("屏幕熄灭：分层模式，低功耗扫描 + 10s 唤醒窗口");
-                    if (!bleRunning) restartScan(); // nubia 息屏会静默停扫，必须重新 start
+                    log("屏幕熄灭：分层模式，改用后台扫描");
+                    if (!bleRunning) startBgScan();
                 } else {
                     acquireWakeLock(60_000);
-                    log("屏幕熄灭：高灵敏模式，续唤醒锁并重启低延迟扫描");
-                    if (!bleRunning) restartScan();
+                    log("屏幕熄灭：高灵敏模式，改用后台扫描");
+                    if (!bleRunning) startBgScan();
                 }
             } else if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action)) {
                 screenOff = false;
+                stopBgScan();
                 if (powerSave) {
                     // 点亮屏幕通常意味着用户要上车：给 10 秒升档窗口
                     boostUntilMs = SystemClock.elapsedRealtime() + 10_000;
@@ -203,7 +213,7 @@ public class CarService extends Service {
             long quietLimit = powerSave ? PS_NO_RESULT_MS : NO_RESULT_RESTART_MS;
             if (bleRunning) {
                 // 解锁/锁车期间暂停扫描是故意的，跳过扫描健康检查
-            } else if (!scanning) {
+            } else if (!scanning && !bgScanning) {
                 log("scanning=false，心跳重新拉起扫描");
                 if (powerSave) acquireWakeLock(10_000);
                 startScan();
@@ -292,6 +302,47 @@ public class CarService extends Service {
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
+            handleScanResult(result);
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            log("scan failed, code=" + errorCode);
+            if (errorCode == 1) { // SCAN_FAILED_ALREADY_STARTED：首次扫描仍在跑，无需重试
+                if (!scanCode1Logged) {
+                    log("scan already active (code=1), ignored（后续不再重复记录）");
+                    scanCode1Logged = true;
+                }
+                scanning = true;
+                return;
+            }
+            scanning = false;
+            handler.postDelayed(CarService.this::startScan, 5000);
+        }
+    };
+
+
+    /** 屏幕熄灭后回调扫描会被 ROM 静默停掉，改用 PendingIntent 后台扫描继续收广播。 */
+    private final BroadcastReceiver bgScanReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent intent) {
+            if (intent == null) return;
+            int error = intent.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, 0);
+            if (error != 0) {
+                log("后台扫描错误 code=" + error);
+                return;
+            }
+            // 栈层总是通过 EXTRA_LIST_SCAN_RESULT 回 ArrayList<ScanResult>（reportDelay=0 时单元素）
+            ArrayList<ScanResult> results =
+                    intent.getParcelableArrayListExtra(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT);
+            if (results == null) return;
+            for (ScanResult r : results) {
+                if (r != null) handleScanResult(r);
+            }
+        }
+    };
+
+    private void handleScanResult(ScanResult result) {
             String addr = result.getDevice().getAddress();
             String name = result.getDevice().getName();
             if (name == null && result.getScanRecord() != null) {
@@ -321,11 +372,14 @@ public class CarService extends Service {
             boostForTarget(); // 分层模式：扫到目标立刻升档，后续连接认证不受低功耗影响
 
             long now = SystemClock.elapsedRealtime();
+            if (rssi >= farRssi + WALK_AWAY_STRONG_MARGIN) lastStrongMs = now;
+            boolean firstSeen = lastTargetTime == 0 || now - lastTargetTime > TARGET_GONE_MS;
             if (nearCount > 0 && now - lastTargetTime > TARGET_GONE_MS) nearCount = 0;
             if (awayCount > 0 && now - lastTargetTime > TARGET_GONE_MS) {
                 // 广播消失：还连着车就立刻锁，别等走远了再重连
                 awayCount = 0;
                 farSinceMs = 0;
+                unlockedForThisApproach = false;
                 if (lockNeeded && now - unlockedAtMs >= LOCK_GRACE_MS
                         && bleSession != null && bleSession.canLockOnSession()
                         && !sessionLockInProgress && !bleRunning) {
@@ -336,6 +390,9 @@ public class CarService extends Service {
                 }
             }
             lastTargetTime = now;
+            if (firstSeen) {
+                log("首次发现目标 RSSI=" + rssi + "dBm / near=" + nearRssi + " / pre=" + prepareRssi());
+            }
 
             if (now - lastSampleTime < SAMPLE_INTERVAL_MS) return; // 采样节流
             lastSampleTime = now;
@@ -354,6 +411,7 @@ public class CarService extends Service {
                 nearCount++;
                 if (nearCount >= NEAR_CONFIRM) {
                     nearCount = 0;
+                    if (unlockedForThisApproach) return;
                     if (preparing && bleUnlocker != null) {
                         unlockWhenReady = true;
                         if (bleUnlocker.isReadyForAction()) doPreparedUnlock();
@@ -372,9 +430,10 @@ public class CarService extends Service {
                 nearCount = 0;
                 awayCount = 0;
                 farSinceMs = 0;
+                if (unlockedForThisApproach) return; // 本次靠近已解锁：坐着休息时不再预连接，避免反复唤醒车端
                 if (!preparing && !bleRunning && bleSession == null && bleUnlocker == null) {
                     prepareConfirm++;
-                    if (prepareConfirm >= 2) {
+                    if (prepareConfirm >= 1) {
                         prepareConfirm = 0;
                         startPrepareSession(rssi, name);
                     }
@@ -383,16 +442,24 @@ public class CarService extends Service {
                 nearCount = 0;
                 prepareConfirm = 0;
                 if (preparing) cancelPrepareSession("信号已走远");
+                if (farSinceMs == 0) farSinceMs = now;
+                awayCount++;
+                if (awayCount == 1 || awayCount % 3 == 0) {
+                    log("目标走远: " + rssi + " dBm, 连续 = " + awayCount + "/" + FAR_CONFIRM
+                            + (now - lastStrongMs < WALK_AWAY_QUIET_MS ? "（最近出现过较强信号，暂不判定走远）" : ""));
+                }
+                // 走远要双条件同时满足：连续 3 次弱信号，且最近 12s 内没出现过较强信号。
+                // 车里休息时 RSSI 会在 -50~-92 之间抖动，1~2 秒的弱信号尖峰不能当“走远”锁车。
+                if (awayCount < FAR_CONFIRM) return;
+                if (now - lastStrongMs < WALK_AWAY_QUIET_MS) return;
+                // 确认真走远：解除“本次靠近已解锁”的记忆，交由下面的锁车逻辑执行
+                awayCount = 0;
+                farSinceMs = 0;
+                unlockedForThisApproach = false;
                 if (bleRunning || sessionLockInProgress) return;
                 // 只锁本 App 解锁过的车：车端原本就锁着时不再发上锁指令（真车会返回 01 并反复重试）
                 if (!lockNeeded) return;
                 if (now - unlockedAtMs < LOCK_GRACE_MS) return; // 刚解锁先别锁，避免门口信号抖动
-                if (farSinceMs == 0) farSinceMs = now;
-                awayCount++;
-                log("目标走远: " + rssi + " dBm, 连续 = " + awayCount + "/" + FAR_CONFIRM);
-                if (awayCount < FAR_CONFIRM) return;
-                awayCount = 0;
-                farSinceMs = 0;
                 if (now - lastAutoLock < autoCooldownMs) return;
                 lastAutoLock = now;
                 if (bleSession != null && bleSession.canLockOnSession()) {
@@ -409,24 +476,13 @@ public class CarService extends Service {
                     if (bleUnlocker != null) bleUnlocker.stop();
                     lockNeeded = false; // 已交给车端，不再重复发指令
                 }
+            } else {
+                // 迟滞中间带（far~prepare 之间）：不算靠近也不算走远，但会打断走远连击，
+                // 避免车内休息时 -87/-83 反复横跳慢慢累计成“连续 3 次弱信号”
+                awayCount = 0;
+                farSinceMs = 0;
             }
-        }
-
-        @Override
-        public void onScanFailed(int errorCode) {
-            log("scan failed, code=" + errorCode);
-            if (errorCode == 1) { // SCAN_FAILED_ALREADY_STARTED：首次扫描仍在跑，无需重试
-                if (!scanCode1Logged) {
-                    log("scan already active (code=1), ignored（后续不再重复记录）");
-                    scanCode1Logged = true;
-                }
-                scanning = true;
-                return;
-            }
-            scanning = false;
-            handler.postDelayed(CarService.this::startScan, 5000);
-        }
-    };
+    }
 
     @Override
     public void onCreate() {
@@ -466,6 +522,18 @@ public class CarService extends Service {
         } catch (Throwable t) {
             logError("屏幕状态监听注册失败", t);
         }
+        // 后台扫描结果接收器：之前漏注册导致息屏扫描结果全部丢失
+        try {
+            IntentFilter bgFilter = new IntentFilter(BG_SCAN_ACTION);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(bgScanReceiver, bgFilter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(bgScanReceiver, bgFilter);
+            }
+            log("后台扫描接收器已注册");
+        } catch (Throwable t) {
+            logError("后台扫描接收器注册失败", t);
+        }
     }
 
     @Override
@@ -491,6 +559,7 @@ public class CarService extends Service {
             bleRunning = false;
             sessionLockInProgress = false;
             lockNeeded = false;
+            unlockedForThisApproach = false;
             AppPrefs.set(this, AppPrefs.K_CAR_CONNECTED, "0");
             AppPrefs.set(this, AppPrefs.K_CAR_DOOR, "");
             unlockedAtMs = 0;
@@ -627,11 +696,74 @@ public class CarService extends Service {
         }
     }
 
+    /** 硬件 MAC 过滤：Android 8.1+ 息屏会压掉无过滤扫描的结果，带过滤才能在口袋里持续收到车广播。 */
+    private List<ScanFilter> buildTargetFilters() {
+        if (TextUtils.isEmpty(targetMac)) return null;
+        try {
+            return Collections.singletonList(
+                    new ScanFilter.Builder().setDeviceAddress(targetMac).build());
+        } catch (Throwable t) {
+            logError("构建 MAC 过滤失败: " + targetMac, t);
+            return null;
+        }
+    }
+
+    private void startBgScan() {
+        if (bgScanning || bleRunning) return;
+        try {
+            if (scanning) {
+                try { scanner.stopScan(scanCallback); } catch (Throwable ignored) {}
+                scanning = false;
+            }
+            BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter adapter = bm != null ? bm.getAdapter() : null;
+            if (adapter == null || !adapter.isEnabled()) {
+                log("后台扫描未启动：蓝牙不可用");
+                return;
+            }
+            // 冷启动（服务被拉起时屏幕已是熄灭）scanner 字段是空的，必须现场获取
+            scanner = adapter.getBluetoothLeScanner();
+            if (scanner == null) {
+                log("后台扫描未启动：scanner null");
+                return;
+            }
+            Intent i = new Intent(BG_SCAN_ACTION).setPackage(getPackageName());
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            bgScanIntent = PendingIntent.getBroadcast(this, 1001, i, flags);
+            ScanSettings settings = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+                    .setReportDelay(0)
+                    .build();
+            scanner.startScan(buildTargetFilters(), settings, bgScanIntent);
+            bgScanning = true;
+            log("后台扫描已启动（PendingIntent，息屏继续收广播）");
+        } catch (Throwable t) {
+            logError("后台扫描启动失败", t);
+        }
+    }
+
+    private void stopBgScan() {
+        if (!bgScanning) return;
+        try {
+            if (scanner != null && bgScanIntent != null) scanner.stopScan(bgScanIntent);
+        } catch (Throwable ignored) {
+        }
+        bgScanning = false;
+        bgScanIntent = null;
+        log("后台扫描已停止");
+    }
+
     private void startScan() {
         if (bleRunning) {
             log("BLE 解锁中，暂停扫描");
             return;
         }
+        if (screenOff) {
+            startBgScan();
+            return;
+        }
+        if (bgScanning) stopBgScan();
         scanAttempts++;
         log("startScan attempt #" + scanAttempts);
         try {
@@ -659,11 +791,9 @@ public class CarService extends Service {
                     .setScanMode(wantHigh ? ScanSettings.SCAN_MODE_LOW_LATENCY
                             : ScanSettings.SCAN_MODE_LOW_POWER)
                     .build();
-            List<ScanFilter> filters = null;
-            if (powerSave && !TextUtils.isEmpty(targetMac)) {
-                filters = Collections.singletonList(
-                        new ScanFilter.Builder().setDeviceAddress(targetMac).build());
-            }
+            // 高灵敏模式也必须带 MAC 过滤：无过滤扫描在息屏时收不到任何结果（AOSP 8.1+ 行为），
+            // 这就是“口袋里不触发、掏出手机才解锁”的根因
+            List<ScanFilter> filters = buildTargetFilters();
             if (scanning && scanner != null) {
                 if (scanHigh != wantHigh) {
                     // 模式变了必须 stop 再 start，否则 ROM 会继续用旧模式
@@ -690,6 +820,7 @@ public class CarService extends Service {
     /** 系统可能在无回调的情况下静默停掉扫描；停掉旧扫描后重新来一次，避免心跳假活。 */
     private void restartScan() {
         log("restartScan: stop old scan and start fresh");
+        stopBgScan();
         try {
             if (scanner != null) {
                 try { scanner.stopScan(scanCallback); } catch (Throwable ignored) {}
@@ -845,6 +976,7 @@ public class CarService extends Service {
                 preparing = false;
                 bleRunning = false;
                 if (success) {
+                    unlockedForThisApproach = true;
                     bleSession = bleUnlocker;
                     lockNeeded = true;
                     unlockedAtMs = SystemClock.elapsedRealtime();
@@ -939,11 +1071,12 @@ public class CarService extends Service {
         if (isAppRunning(SAIC_PACKAGE)) {
             log("BLE 警告：上汽荣威 App 进程仍在运行，可能占用车端认证会话！请强行停止它");
         }
-        // 操作期间暂停扫描，减少射频竞争，把时间片让给存在广播
+        // 操作期间暂停扫描（含息屏后台扫描），减少射频竞争，把时间片让给存在广播
         try {
             if (scanner != null && scanning) scanner.stopScan(scanCallback);
         } catch (Throwable ignored) {}
         scanning = false;
+        stopBgScan();
         log("BLE: 开始" + (manual ? "手动" : "自动") + actionName + "（" + rssi + "dBm / " + name + "）");
         final int[] resultMode = {mode};
         bleUnlocker = new BleDirectUnlocker(this, targetMac, mode, new BleDirectUnlocker.Callback() {
@@ -969,6 +1102,7 @@ public class CarService extends Service {
                     bleSession = null;
                     AppPrefs.set(CarService.this, AppPrefs.K_CAR_CONNECTED, "0");
                 } else if (success && resultMode[0] == BleDirectUnlocker.MODE_UNLOCK) {
+                    unlockedForThisApproach = true;
                     bleSession = bleUnlocker; // 解锁成功后保留会话：一键启动 + 走远直接锁车
                     lockNeeded = true;       // 只有本 App 解锁过的车才需要自动上锁
                     unlockedAtMs = SystemClock.elapsedRealtime();
@@ -983,6 +1117,7 @@ public class CarService extends Service {
                 String done = resultMode[0] == BleDirectUnlocker.MODE_LOCK ? "锁车" : "解锁";
                 if (resultMode[0] == BleDirectUnlocker.MODE_LOCK && success) {
                     // 锁车后清零状态：下次靠近可以立刻自动解锁，不再被旧冷却卡住
+                    unlockedForThisApproach = false;
                     AppPrefs.set(CarService.this, AppPrefs.K_CAR_CONNECTED, "0");
                     lockNeeded = false;
                     lastAutoUnlock = 0;
@@ -1082,6 +1217,7 @@ public class CarService extends Service {
     public void onDestroy() {
         log("onDestroy");
         stopWakeAd();
+        stopBgScan();
         if (scanner != null && scanning) {
             try { scanner.stopScan(scanCallback); } catch (Throwable ignored) {}
         }
@@ -1090,6 +1226,7 @@ public class CarService extends Service {
         handler.removeCallbacks(sdkInitTask);
         handler.removeCallbacks(sdkScanTask);
         try { unregisterReceiver(screenReceiver); } catch (Throwable ignored) {}
+        try { unregisterReceiver(bgScanReceiver); } catch (Throwable ignored) {}
         if (bleUnlocker != null) {
             bleUnlocker.stop();
             bleUnlocker = null;
